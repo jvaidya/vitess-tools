@@ -1,6 +1,6 @@
 
 
-#TODO list for deployment helper
+# TODO list for deployment helper
 
 ### General
   * In the sharding demo, add the step to start replication back to the old master.
@@ -28,7 +28,7 @@
 	components: lockserver, vtctld, vttablets, vtgate, mysql, all
 	modifiers: --interactive, --vtctld-addr, --verbose
 
-###Possible states and code for reconciliation
+### Possible states and code for reconciliation
 
 	Config state
 	Process state (are processes running as per config)
