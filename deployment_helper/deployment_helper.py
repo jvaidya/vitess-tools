@@ -8,6 +8,8 @@ import readline
 import json
 import subprocess
 
+args = None
+
 DEPLOYMENT_DIR = os.path.expanduser('~/vitess-deployment')
 
 """
@@ -125,7 +127,7 @@ class HostClass(ConfigType):
     hardware_recommendation = ""
     host_number_calculation = ""
     num_recommended_hosts = 0
-    available_hosts = []
+    configured_hosts = []
 
     def read_config(self):
         self.prologue()
@@ -157,9 +159,9 @@ you can specify a file (one host per line) as "file:/path/to/file"."""
         if host_input.startswith('file:'):
             _, path = host_input.split(':')
             with open(path) as fh:
-                self.available_hosts = fh.readlines()
+                self.configured_hosts = fh.readlines()
         else:
-            self.available_hosts = host_input.split(':')
+            self.configured_hosts = host_input.split(':')
 
     def read_config_interactive(self):
         raise NotImplemented
@@ -227,11 +229,11 @@ class Zk2(HostClass):
 on 3 different hosts. If you are running the local cluster demo, you can run all three on one host."""
     
     def __init__(self):
-        self.zk_hosts = []
+        self.hosts = []
         self.zk_config = []
 
     def get_default_host(self, i):
-        return self.available_hosts[i % len(self.available_hosts)]
+        return self.configured_hosts[i % len(self.configured_hosts)]
     
     def read_config_interactive(self):
         print
@@ -239,24 +241,24 @@ on 3 different hosts. If you are running the local cluster demo, you can run all
         
         for i in xrange(self.num_instances):
             instance_num = i + 1
-            zk_host = read_value('For instance %d, enter hostname: ' % instance_num, self.get_default_host(i))
-            self.zk_hosts.append(zk_host)
-            leader_port = base_ports['zk2']['leader_port'] + self.zk_hosts.count(zk_host) - 1
-            election_port = base_ports['zk2']['election_port'] + self.zk_hosts.count(zk_host) - 1
-            client_port = base_ports['zk2']['client_port'] + self.zk_hosts.count(zk_host) - 1
+            host = read_value('For instance %d, enter hostname: ' % instance_num, self.get_default_host(i))
+            self.hosts.append(host)
+            leader_port = base_ports['zk2']['leader_port'] + self.hosts.count(host) - 1
+            election_port = base_ports['zk2']['election_port'] + self.hosts.count(host) - 1
+            client_port = base_ports['zk2']['client_port'] + self.hosts.count(host) - 1
             def_ports = '%(leader_port)s:%(election_port)s:%(client_port)s' % locals()
             zk_ports = read_value('For instance %d, enter leader_port:election_port:client_port: ' % instance_num, def_ports)
             print
-            self.zk_config.append((zk_host,zk_ports))
+            self.zk_config.append((host,zk_ports))
 
     def set_topology(self):
         zk_cfg_lines = []
         zk_server_lines = []
-        for i, (zk_host, zk_ports) in enumerate(self.zk_config):
+        for i, (host, zk_ports) in enumerate(self.zk_config):
             count = i + 1
             client_port = zk_ports.split(':')[-1]
-            zk_cfg_lines.append('%(count)s@%(zk_host)s:%(zk_ports)s' %locals())
-            zk_server_lines.append('%(zk_host)s:%(client_port)s' %locals())
+            zk_cfg_lines.append('%(count)s@%(host)s:%(zk_ports)s' %locals())
+            zk_server_lines.append('%(host)s:%(client_port)s' %locals())
         self.zk_server_var = ','.join(zk_server_lines)
         self.zk_config_var = ','.join(zk_cfg_lines)
         self.topology_flags = ' '.join(['-topo_implementation zk2',
@@ -293,7 +295,7 @@ echo "Stopping zk servers..."
 ACTION="shutdown"
 """
         out.append(action)
-        for i, (zk_host, zk_ports) in enumerate(self.zk_config):
+        for i, (host, zk_ports) in enumerate(self.zk_config):
             count = str(i + 1)
             cmd = self._make_zk_command(count)
             out.append('# Stop zk2 instance %s' % count)
@@ -305,7 +307,7 @@ ACTION="shutdown"
     def up_commands(self):
         out = [self.make_header()]
         out.append('echo "Starting zk servers..."')
-        for i, (zk_host, zk_ports) in enumerate(self.zk_config):
+        for i, (host, zk_ports) in enumerate(self.zk_config):
             count = str(i + 1)
             test = """
 if [ -e $VTDATAROOT/zk_%03d ]; then
@@ -923,21 +925,30 @@ FLUSH PRIVILEGES;
         # set INIT_DB_SQL_FILE
 
 def define_args():
-    parser = argparse.ArgumentParser(description='Set up host for a vitess deployment role.')
-    # We support the following modes:
-    # init [local]
-    #   Set up lockserver.
-    #   Set up vtctld.
-    #   Set up vtgate.
-    # shard
-    # add tablet
-    # init cell
-    
-    prod_parser = parser.add_mutually_exclusive_group(required=False)
-    prod_parser.add_argument('--prod', dest='prod', action='store_true', help='apply constraints and give advice for an actual production deployment.')
-    prod_parser.add_argument('--no-prod', dest='prod', action='store_false', help='consider this to be a test deployment.')
-    parser.set_defaults(prod=False)
-    return parser.parse_args()
+    ap = argparse.ArgumentParser('Vitess Cluster Management helper.')
+    actions = ['configure', 'generate', 'start', 'stop', 'report', 'run_demo']
+    components = ['lockserver', 'vtctld', 'vttablets', 'vtgate', 'all']
+    ap.add_argument('--action', default='configure',
+                     choices=actions,
+                     nargs='*',
+                     help='Specify action[s]')
+
+    ap.add_argument('--component', default='all',
+                    nargs='*',
+                    choices=components,
+                    help='Specify the component[s] to act on.')
+
+    ap.add_argument('--interactive', type=str2bool, nargs='?',
+                    default=True, const=True,
+                    help='Turn interactive mode on or off.')
+
+    ap.add_argument('--verbose', type=str2bool, nargs='?',
+                    default=True, const=True,
+                    help='Turn verbose mode on or off.')
+
+    ap.add_argument('--vtctld-addr',
+                    help='Specify vtctld-addr (useful in non-interactive mode).')
+    return ap
 
 def create_start_local_cluster(hostname):
     template ="""#!/bin/bash
@@ -1338,9 +1349,20 @@ echo Look at http://%(vtctld_host)s:15000/ and verify that you only see shards 8
 echo 
 """
     write_bin_file("run_sharding_workflow.sh", template % locals())
-    
+
+def str2bool(v):
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def main():
-    args = define_args()
+    global args
+    parser = define_args()
+    args = parser.parse_args()
+    
     public_hostname = get_public_hostname()
     print 'This host is:'
     print '\tlocalhost = %s' % g_local_hostname
