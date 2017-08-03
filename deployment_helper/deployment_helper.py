@@ -1174,7 +1174,7 @@ cat << EOF
 Once the tablets are ready, initialize replication by electing the first master for each of the new shards:
 EOF
 for shard in "80-" "-80"; do 
-    tablet=$(vtctlclient -server %(vtctld_host):15999 ListShardTablets test_keyspace/$shard | head -1 | awk '{print $1}')
+    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets test_keyspace/$shard | head -1 | awk '{print $1}')
     echo vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force test_keyspace/$shard $tablet
     read -p "Hit Enter to run the above command ..."
     vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force test_keyspace/$shard $tablet
