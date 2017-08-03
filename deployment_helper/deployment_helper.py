@@ -1155,18 +1155,26 @@ cat << EOF
 Now bring up tablets on 2 other hosts for shards -80 and 80- using deployment_helper.py
 (When prompted for vtctld, please point to %(vtctld_host)s)
 
-Once this is done, run the following commands and you should be able to see all tablets here.
+EOF
+
+read -p "Hit Enter when you have finished starting the tablets for shards -80 and 80- ..."
+
+cat << EOF
+
+Now, run the following command.  You should be able to see tablets for all 3 shards.
+
 EOF
 
 echo vtctlclient -server %(vtctld_host)s:15999 ListAllTablets
-read -p "Hit Enter to run the above command ..." test
+read -p "Hit Enter to run the above command ..."
+
 vtctlclient -server %(vtctld_host)s:15999 ListAllTablets test
 
 cat << EOF
 Once the tablets are ready, initialize replication by electing the first master for each of the new shards:
 EOF
 for shard in "80-" "-80"; do 
-    tablet=$(vtctlclient -server ec2-35-163-226-51.us-west-2.compute.amazonaws.com:15999 ListShardTablets test_keyspace/$shard | head -1 | awk '{print $1}')
+    tablet=$(vtctlclient -server %(vtctld_host):15999 ListShardTablets test_keyspace/$shard | head -1 | awk '{print $1}')
     echo vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force test_keyspace/$shard $tablet
     read -p "Hit Enter to run the above command ..."
     vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force test_keyspace/$shard $tablet
