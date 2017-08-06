@@ -587,8 +587,8 @@ class VtTablet(HostClass):
         print
         print 'Now we will gather information about vttablets.'
         print
-        self.shard = read_value('Enter shard name "0", "80-" "-80" etc.:','0')
-        possible_values = ['0', '80-', '-80']
+        self.shard = read_value('Enter shard name "0", "-80" "80-" etc.:','0')
+        possible_values = ['0', '-80', '80-']
         if self.shard in possible_values:
             self.base_offset = str(100 * (possible_values.index(self.shard) + 1))
         else:
