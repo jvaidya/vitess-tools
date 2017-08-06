@@ -49,7 +49,7 @@ on a partition where there is enough disk space for your data.
     DEPLOYMENT_DIR = os.path.join(VTROOT, 'vitess-deployment')
     print 'DEPLOYMENT_DIR=%s' % DEPLOYMENT_DIR
     print
-    
+
 g_local_hostname = socket.getfqdn()
 
 def read_value(prompt, prefill=''):
@@ -81,7 +81,7 @@ class ConfigType(object):
     Written to a config file.
     Is prompted for and read from user input.
     """
-    ConfigTypes = [types.DictType, types.StringType, types.ListType, types.IntType]    
+    ConfigTypes = [types.DictType, types.StringType, types.ListType, types.IntType]
 
     def get_config_file(self):
         config_dir = os.path.join(DEPLOYMENT_DIR, 'config')
@@ -127,8 +127,8 @@ class ConfigType(object):
             self.write_config()
         else:
             with open(config_file) as fh:
-                self.__dict__.update(json.load(fh))            
-        
+                self.__dict__.update(json.load(fh))
+
 # We need to keep a per-host, per port-type count of last port used
 # So that we can properly increment when there are multiple instances
 # on the same host
@@ -143,10 +143,11 @@ class HostClass(ConfigType):
     num_recommended_hosts = 0
     configured_hosts = []
 
-    def read_config(self):
-        self.prologue()
+    def read_config(self, show_prologue=True):
+        if show_prologue:
+            self.prologue()
         super(HostClass, self).read_config()
-        
+
     def prologue(self):
         name = self.name or self.short_name
         name = '  %s  ' % name
@@ -162,14 +163,14 @@ class HostClass(ConfigType):
             print
             print self.host_number_calculation
             print
-    
+
     def get_hosts(self):
         print 'Configured hosts = %s' % self.configured_hosts
         print """Please specify additional hosts to use for this component.
 To specify hosts, you can enter hostnames seperated by commas or
 you can specify a file (one host per line) as "file:/path/to/file"."""
         public_hostname = get_public_hostname()
-        host_prompt = 'Specify hosts for "%s":' % self.short_name        
+        host_prompt = 'Specify hosts for "%s":' % self.short_name
         host_input = read_value(host_prompt, public_hostname)
         if host_input.lower().startswith('file:'):
             _, path = host_input.split(':')
@@ -191,11 +192,11 @@ you can specify a file (one host per line) as "file:/path/to/file"."""
         if self.up_filename:
             out = self.up_commands()
             write_bin_file(self.up_filename, out)
-            print 'Generated %s' % self.up_filename
+            print '\t%s' % self.up_filename
         if self.down_filename:
             out = self.down_commands()
             write_bin_file(self.down_filename, out)
-            print 'Generated %s' % self.down_filename            
+            print '\t%s' % self.down_filename
 
     def start(self):
         start_command = os.path.join(DEPLOYMENT_DIR, 'bin', self.up_filename)
@@ -227,7 +228,7 @@ you can specify a file (one host per line) as "file:/path/to/file"."""
         else:
             print 'ERRROR: action "%s" is not defined in %s' % (action, self)
             sys.exit(1)
-            
+
 class Deployment(object):
     pass
 
@@ -235,6 +236,7 @@ class LockServer(HostClass):
     short_name = 'lockserver'
     def __init__(self):
         self.ls = None
+        self.get_hosts = None
         self.ls_type = None
         if args.vtctld_addr is not None:
             self.init_from_vtctld(args.vtctld_addr)
@@ -251,7 +253,7 @@ class LockServer(HostClass):
         cmd = ['vtctlclient', '-server', vtctld_endpoint, 'GetCellInfo', CELL]
         cell_info = json.loads(subprocess.check_output(cmd))
         self.set_topology_from_vtctld(cell_info)
-        
+
     def read_config_interactive(self):
         print 'Vitess supports two types of lockservers, zookeeper (zk2) and etcd (etcd)'
         print
@@ -270,14 +272,14 @@ class LockServer(HostClass):
         self.ls.set_topology()
         self.topology_flags = self.ls.topology_flags
         self.num_instances = self.ls.num_instances
-        
+
     def generate(self):
         self.ls.generate()
 
     def set_topology_from_vtctld(self, cell_info):
         if '21811' in cell_info['server_address']:
             self.ls_type = 'zk2'
-            self.server_var = cell_info['server_address']            
+            self.server_var = cell_info['server_address']
             self.topology_flags = ' '.join(['-topo_implementation %s' % self.ls_type,
                                        '-topo_global_server_address %s' % self.server_var,
                                        '-topo_global_root /vitess/global'])
@@ -293,18 +295,18 @@ class Zk2(HostClass):
     hardware_recommendation = 'We recommend a host with x cpus and y memory for each Zookeeper instance'
     host_number_calculation = """A LockServer needs odd number of instances to establish quorum, we recommend at least 3
 on 3 different hosts. If you are running the local cluster demo, you can run all three on one host."""
-    
+
     def __init__(self):
         self.hosts = []
         self.zk_config = []
 
     def get_default_host(self, i):
         return self.configured_hosts[i % len(self.configured_hosts)]
-    
+
     def read_config_interactive(self):
         print
         self.num_instances = int(read_value('Enter number of instances :', '3'))
-        
+
         for i in xrange(self.num_instances):
             instance_num = i + 1
             host = read_value('For instance %d, enter hostname: ' % instance_num, self.get_default_host(i))
@@ -382,7 +384,7 @@ else
     ACTION="init"
 fi""" % int(count)
             out.append(test)
-            cmd = self._make_zk_command(count)            
+            cmd = self._make_zk_command(count)
             out.append('# Start instance %s' % count)
             out.append(cmd)
 
@@ -391,7 +393,7 @@ fi""" % int(count)
         cmd = [os.path.join(VTROOT, 'bin/zk'),
                '-server', '${ZK_SERVER}',
                'touch','-p','/vitess/global']
-        
+
         out.append(' '.join(cmd))
         cmd = [os.path.join(VTROOT, 'bin/zk'),
                '-server', '${ZK_SERVER}',
@@ -412,7 +414,7 @@ fi""" % int(count)
 
 def write_bin_file(fname, out):
     write_dep_file('bin', fname, out)
-    
+
 def write_dep_file(subdir, fname, out):
     dirpath = os.path.join(DEPLOYMENT_DIR, subdir)
     if not os.path.isdir(dirpath):
@@ -421,7 +423,7 @@ def write_dep_file(subdir, fname, out):
         fh.write(out)
     if subdir == 'bin':
         os.chmod(os.path.join(dirpath, fname), 0755)
-        
+
 class VtCtld(HostClass):
     name = 'VtCtld server'
     description = """The vtctld server provides a web interface that displays all of the coordination information stored in ZooKeeper.
@@ -431,14 +433,14 @@ The vtctld server also accepts commands from the vtctlclient tool, which is used
     up_filename = 'vtctld-up.sh'
     down_filename = 'vtctld-down.sh'
     short_name = 'vtctld'
-    
+
     def __init__(self, hostname, ls):
         self.hostname = hostname
         self.ls = ls
         self.ports = dict(web_port=15000, grpc_port=15999)
         if args.vtctld_addr is None:
             self.read_config()
-        
+
     def read_config_interactive(self):
         pass
 
@@ -500,13 +502,13 @@ class VtGate(HostClass):
     up_filename = 'vtgate-up.sh'
     down_filename = 'vtgate-down.sh'
     short_name = 'vtgate'
-    
+
     def __init__(self, hostname, ls):
         self.hostname = hostname
         self.ls = ls
         self.ports = dict(web_port=15001, grpc_port=15991, mysql_server_port=15306)
         self.read_config()
-        
+
     def read_config_interactive(self):
         pass
 
@@ -521,7 +523,7 @@ pid=`cat $VTDATAROOT/tmp/vtgate.pid`
 echo "Stopping vtgate..."
 kill $pid
 """
-    
+
     def up_commands(self):
         topology_flags = self.ls.topology_flags
         cell = CELL
@@ -529,7 +531,7 @@ kill $pid
         web_port = self.ports['web_port']
         mysql_server_port = self.ports['mysql_server_port']
         hostname = self.hostname
-        
+
         return """
 #!/bin/bash
 set -e
@@ -570,7 +572,7 @@ class VtTablet(HostClass):
     up_filename = 'vttablet-up.sh'
     down_filename = 'vttablet-down.sh'
     short_name = 'vttablet'
-    
+
     def __init__(self, hostname, ls, vtctld):
         self.hostname = hostname
         self.ls = ls
@@ -606,7 +608,7 @@ class VtTablet(HostClass):
     def generate(self):
         super(VtTablet, self).generate()
         self.dbconfig.generate()
-        
+
     def make_header(self):
         topology_flags = self.ls.topology_flags
         cell = CELL
@@ -619,7 +621,7 @@ mkdir -p ${VTDATAROOT}/tmp
 
 CELL=%(cell)s
 TOPOLOGY_FLAGS="%(topology_flags)s"
-""" % locals()    
+""" % locals()
 
     def down_commands(self):
         cell = CELL
@@ -676,7 +678,7 @@ wait
         shard = self.shard
         base_offset = self.base_offset
         replica_gate = int(self.num_replicas) - 1
-        uids = "${@:-'%s'}" % ' '.join([str(i) for i in range(int(self.num_tablets))])        
+        uids = "${@:-'%s'}" % ' '.join([str(i) for i in range(int(self.num_tablets))])
         template = r"""
 DBCONFIG_DBA_FLAGS=%(dbconfig_dba_flags)s
 DBCONFIG_FLAGS=%(dbconfig_flags)s
@@ -823,11 +825,11 @@ DB_USERS = {
     'filtered': {
         'description': 'User for Vitess filtered replication (binlog player).',
         'permissions': DEFAULT_PERMISSIONS,
-        },    
+        },
     'dba': {
         'description': 'Admin user with all privilages.',
         'permissions': ['ALL'],
-    },    
+    },
 }
 
 GLOBAL_PARAMS = {
@@ -844,7 +846,7 @@ class DbConnectionTypes(ConfigType):
         self.db_types = DB_USERS.keys()
         self.init_file = 'init_db.sql'
         self.read_config()
-        
+
     def read_config_interactive(self):
         print
         print 'Vitess uses a "Sidecar Database" to store metadata.'
@@ -863,7 +865,7 @@ class DbConnectionTypes(ConfigType):
             prompt = 'Enter username for "%s":' % db_type
             default = 'vt_%s' % db_type
             user = read_value(prompt, default)
-            self.dbconfig[db_type]['user'] = user        
+            self.dbconfig[db_type]['user'] = user
             prompt = 'Enter password for %s (press Enter for no password):' % user
             password = read_value(prompt)
             self.dbconfig[db_type]['user'] = user
@@ -879,12 +881,12 @@ class DbConnectionTypes(ConfigType):
                 param = param % locals()
             if '%' in default:
                 default = default % locals()
-            self.dbconfig['global'][param] = read_value('Enter "%s":' % param, default) 
+            self.dbconfig['global'][param] = read_value('Enter "%s":' % param, default)
 
     def generate(self):
         out = self.make_init_db_sql()
         write_dep_file('config', self.init_file, out)
-        
+
     def get_dba_flags(self):
         charset = self.dbconfig['global']['charset']
         flags = []
@@ -895,10 +897,10 @@ class DbConnectionTypes(ConfigType):
             flags.append(fmt % locals())
             for param, value in self.dbconfig['global'].iteritems():
                 if db_type == 'dba' and param == 'dbname':
-                    continue                
+                    continue
                 flags.append('-db-config-%(db_type)s-%(param)s %(value)s' % locals())
         return '"%s"' % ' '.join(flags)
-    
+
     def get_flags(self):
         keyspace = '%s_keyspace' % CELL
         charset = self.dbconfig['global']['charset']
@@ -912,10 +914,10 @@ class DbConnectionTypes(ConfigType):
                 if db_type == 'dba' and param == 'dbname':
                     continue
                 flags.append('-db-config-%(db_type)s-%(param)s %(value)s' % locals())
-            
+
         return '"%s"' % ' '.join(flags)
 
-    
+
     def make_init_db_sql(self):
         sidecar_dbname = self.sidecar_dbname
         header = """# This file is executed immediately after mysql_install_db,
@@ -969,7 +971,7 @@ FLUSH PRIVILEGES;
         for db_type in self.db_types:
             line = '# %s' % DB_USERS[db_type]['description']
             out.append(line)
-            
+
             perms = self.dbconfig[db_type]['permissions']
             user = self.dbconfig[db_type]['user']
             password = self.dbconfig[db_type]['password']
@@ -989,11 +991,11 @@ FLUSH PRIVILEGES;
                     line += " IDENTIFIED BY '%(password)s;" % locals()
                 else:
                     line += ";"
-                    out.append(line)                
+                    out.append(line)
             out.append('')
 
         return header + '\n'.join(out) + footer
-        
+
     def set_vars():
         self.vars['DBCONFIG_DBA_FLAGS'] = None
         self.vars['DBCONFIG_FLAGS'] = None
@@ -1055,13 +1057,13 @@ $DIR/zk-up.sh
 
 echo
 echo The vtctld server provides a web interface that displays all of the coordination information stored in ZooKeeper.
-echo 
+echo
 echo $DIR/vtctld-up.sh
 read -p "Hit Enter to run the above command ..."
 $DIR/vtctld-up.sh
 
 echo
-echo Open http://%(hostname)s:15000 to verify that vtctld is running. 
+echo Open http://%(hostname)s:15000 to verify that vtctld is running.
 echo "There won't be any information there yet, but the menu should come up, which indicates that vtctld is running."
 
 echo The vtctld server also accepts commands from the vtctlclient tool, which is used to administer the cluster.
@@ -1207,7 +1209,7 @@ exec $VTROOT/bin/vtworker \
   "$@"
 """
     write_bin_file('vtworker.sh', vtworker % locals())
-    
+
     template = r"""#!/bin/bash
 set -e
 
@@ -1267,7 +1269,7 @@ vtctlclient -server %(vtctld_host)s:15999 ListAllTablets test
 cat << EOF
 Once the tablets are ready, initialize replication by electing the first master for each of the new shards:
 EOF
-for shard in "80-" "-80"; do 
+for shard in "80-" "-80"; do
     tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets test_keyspace/$shard | head -1 | awk '{print $1}')
     echo vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force test_keyspace/$shard $tablet
     read -p "Hit Enter to run the above command ..."
@@ -1299,15 +1301,15 @@ cat << EOF
 Next we copy the data. Since the amount of data to copy can be very large, we use a special batch process
 called vtworker to stream the data from a single source to multiple destinations, routing each row based on its keyspace_id.
 
-Notice that we only needed to specifiy the source shard, test_keyspace/0. 
+Notice that we only needed to specifiy the source shard, test_keyspace/0.
 The SplitClone process will automatically figure out which shards to use as the destinations based on the key range that needs to be covered.
 In this case, shard 0 covers the entire range, so it identifies -80 and 80- as the destination shards, since they combine to cover the same range.
 
-Next, it will pause replication on one rdonly (offline processing) tablet to serve as a consistent snapshot of the data. 
-The app can continue without downtime, since live traffic is served by replica and master tablets, which are unaffected. 
+Next, it will pause replication on one rdonly (offline processing) tablet to serve as a consistent snapshot of the data.
+The app can continue without downtime, since live traffic is served by replica and master tablets, which are unaffected.
 Other batch jobs will also be unaffected, since they will be served only by the remaining, un-paused rdonly tablets.
 
-Once the copy from the paused snapshot finishes, vtworker turns on filtered replication from the source shard to each destination shard. 
+Once the copy from the paused snapshot finishes, vtworker turns on filtered replication from the source shard to each destination shard.
 This allows the destination shards to catch up on updates that have continued to flow in from the app since the time of the snapshot.
 
 EOF
@@ -1358,8 +1360,8 @@ $DIR/vtworker.sh SplitDiff test_keyspace/80-
 
 cat << EOF
 
-Now we are ready to switch over to serving from the new shards. 
-The MigrateServedTypes command lets you do this one tablet type at a time, and even one cell at a time. 
+Now we are ready to switch over to serving from the new shards.
+The MigrateServedTypes command lets you do this one tablet type at a time, and even one cell at a time.
 The process can be rolled back at any point until the master is switched over.
 EOF
 
@@ -1377,12 +1379,12 @@ vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes test_keyspace/0 mas
 
 cat << EOF
 
-During the master migration, the original shard master will first stop accepting updates. 
-Then the process will wait for the new shard masters to fully catch up on filtered replication before allowing them to begin serving. 
+During the master migration, the original shard master will first stop accepting updates.
+Then the process will wait for the new shard masters to fully catch up on filtered replication before allowing them to begin serving.
 Since filtered replication has been following along with live updates, there should only be a few seconds of master unavailability.
 
-When the master traffic is migrated, the filtered replication will be stopped. 
-Data updates will be visible on the new shards, but not on the original shard. 
+When the master traffic is migrated, the filtered replication will be stopped.
+Data updates will be visible on the new shards, but not on the original shard.
 See it for yourself: Let us add a few rows and then inspect the database content.
 
 EOF
@@ -1429,7 +1431,7 @@ read -p "Hit Enter to run the above command ..."
 echo
 echo Congratulations, you have succesfully resharded your database.
 echo Look at http://%(vtctld_host)s:15000/ and verify that you only see shards 80- and -80.
-echo 
+echo
 """
     write_bin_file("run_sharding_workflow.sh", template % locals())
 
@@ -1447,7 +1449,7 @@ def main():
     args = parser.parse_args()
     actions = args.action
     components = args.component
-    
+
     if type(actions) is str:
         actions = [actions]
     if type(components) is str:
@@ -1477,38 +1479,33 @@ def main():
     for action in actions:
         if action == 'run_demo':
             continue
+        if action == 'generate':
+            print
+            print 'Generating scripts under: %s' % os.path.join(DEPLOYMENT_DIR, 'bin')
+            print
         for component in components:
             c_instances[component].run_action(action)
-    for cname in components:
-        c = c_instances[cname]
-        print '\t%s' % c.up_filename
-        print '\t%s' % c.down_filename
+
     if 'run_demo' in actions:
             run_demo(public_hostname, c_instances['lockserver'], c_instances['vtctld'])
-            
+
 def run_demo(public_hostname, ls, vtctld):
     create_start_local_cluster(public_hostname)
     create_destroy_local_cluster()
     create_sharding_workflow_script(ls, vtctld)
-    print 'The following scripts were generated under: %s' % os.path.join(DEPLOYMENT_DIR, 'bin')    
     print '\t%s' % 'start_local_cluster.sh'
     print '\t%s' % 'destroy_local_cluster.sh'
-    print '\t%s' % 'run_sharding_workflow.sh'        
+    print '\t%s' % 'run_sharding_workflow.sh'
     print
-    # print 'Note: Vitess binaries create log files under: %s' % os.path.join(VTDATAROOT, 'tmp')
-
     start_local = os.path.join(DEPLOYMENT_DIR, 'bin', 'start_local_cluster.sh')
     response = read_value('Run "%s" to start local cluster now? :' % start_local, 'Y')
     if response == 'Y':
         subprocess.call(['bash', start_local])
-
     print
-        
     run_sharding = os.path.join(DEPLOYMENT_DIR, 'bin', 'run_sharding_workflow.sh')
     response = read_value('Run "%s" to demo sharding workflow now? :' % run_sharding, 'Y')
     if response == 'Y':
-        subprocess.call(['bash', run_sharding])                    
-    
+        subprocess.call(['bash', run_sharding])
+
 if __name__ == '__main__':
     main()
-    
