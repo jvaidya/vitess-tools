@@ -493,6 +493,7 @@ disown -a
 
 echo "Access vtctld web UI at http://${HOSTNAME}:${WEB_PORT}"
 echo "Send commands with: vtctlclient -server ${HOSTNAME}:${GRPC_PORT} ..."
+echo "Note: vtctld writes logs under $VTDATAROOT/tmp.
 """ % locals()
 
 class VtGate(HostClass):
@@ -558,6 +559,7 @@ $VTROOT/bin/vtgate \
   > $VTDATAROOT/tmp/vtgate.out 2>&1 &
 
 echo "Access vtgate at http://${HOSTNAME}:${WEB_PORT}/debug/status"
+echo "Note: vtgate writes logs under $VTDATAROOT/tmp.
 
 disown -a
 
@@ -569,12 +571,12 @@ class VtTablet(HostClass):
     down_filename = 'vttablet-down.sh'
     short_name = 'vttablet'
     
-    def __init__(self, hostname, ls, dbconfig, vtctld):
+    def __init__(self, hostname, ls, vtctld):
         self.hostname = hostname
         self.ls = ls
-        self.dbconfig = dbconfig
         self.vtctld = vtctld
         self.read_config()
+        self.dbconfig = DbConnectionTypes()
 
     def read_config_interactive(self):
         # Read number of 'readonly' tablets
@@ -784,6 +786,8 @@ wait
 for instance_number in $uids; do
     start_vttablet $instance_number
 done
+
+echo "Note: vttablet writes logs under $VTDATAROOT/tmp.
 
 disown -a
 
@@ -1139,6 +1143,8 @@ You can now explore the cluster:
 
     Access vtgate at http://%(hostname)s:15001/debug/status
     Connect to vtgate either at grpc_port or mysql_port and run queries against vitess.
+
+    Note: Vitess binaries write write logs under $VTDATAROOT/tmp.
 EOF
 
 """
@@ -1465,8 +1471,7 @@ def main():
     if 'vtgate' in components:
         c_instances['vtgate'] = VtGate(public_hostname, c_instances['lockserver'])
     if 'vttablet' in components:
-        c_instances['dbcfg'] = DbConnectionTypes()
-        c_instances['vttablet'] = VtTablet(public_hostname, c_instances['lockserver'], c_instances['dbcfg'], c_instances['vtctld'])
+        c_instances['vttablet'] = VtTablet(public_hostname, c_instances['lockserver'], c_instances['vtctld'])
     # TODO: sort actions
     # TODO: sort components
     for action in actions:
@@ -1500,84 +1505,10 @@ def run_demo(public_hostname, ls, vtctld):
     print
         
     run_sharding = os.path.join(DEPLOYMENT_DIR, 'bin', 'run_sharding_workflow.sh')
-    response = read_value('Run "%s" to demo sharding workflow now? :' % start_local, 'Y')
+    response = read_value('Run "%s" to demo sharding workflow now? :' % run_sharding, 'Y')
     if response == 'Y':
         subprocess.call(['bash', run_sharding])                    
     
-def main_orig():
-    global args
-    parser = define_args()
-    args = parser.parse_args()
-    
-    public_hostname = get_public_hostname()
-    print 'This host is:'
-    print '\tlocalhost = %s' % g_local_hostname
-    if g_local_hostname != public_hostname:
-        print '\tpublic_hostname = %s' % public_hostname
-        print
-    check_host()
-
-    # fix google init file so that python programs can find protobufs
-    fix_google_init_file()
-    public_hostname = get_public_hostname()
-    local_hostname = g_local_hostname    
-
-    is_vtctld = read_value('Do you have a vtctld process running in your deploment? [Y/N] :', 'N')
-    if is_vtctld == 'Y':
-        vtctld_host = read_value('Enter the vtctld hostname: ')
-        vtctld_port = read_value('Enter vtctld port number: ', str(base_ports['vtctld']['grpc_port']))
-        vtctld_endpoint = '%s:%s' % (vtctld_host, vtctld_port)
-        print 'Connecting to vtctld to get topological information at "%s".' % vtctld_endpoint
-        cmd = ['vtctlclient', '-server', vtctld_endpoint, 'GetCellInfoNames']
-        cells = subprocess.check_output(cmd).split('\n')
-        print 'Found cells: %s' % cells
-        set_cell(cells[0])
-        cmd = ['vtctlclient', '-server', vtctld_endpoint, 'GetCellInfo', CELL]
-        print ' '.join(cmd)
-        cell_info = json.loads(subprocess.check_output(cmd))
-        print cell_info
-        ls = LockServer()
-        ls.set_topology_from_vtctld(cell_info)
-        vtctld = VtCtld(vtctld_host, ls)
-        dbcfg = DbConnectionTypes()
-        dbcfg.read_config()
-        dbcfg.generate()
-        vttablet = VtTablet(public_hostname, ls, dbcfg, vtctld)
-        vttablet.read_config()
-        vttablet.generate()
-        print
-        print 'The following scripts were generated under: %s' % DEPLOYMENT_DIR
-        for c in [vttablet]:
-            print '\t%s' % c.up_filename
-            print '\t%s' % c.down_filename
-        start_local = os.path.join(DEPLOYMENT_DIR, 'bin', vttablet.up_filename)
-        response = read_value('Run "%s" to start vttablet now? :' % start_local, 'Y')
-        if response == 'Y':
-            subprocess.call(['bash', start_local])
-    else:
-        set_cell('test')
-        ls = LockServer()
-        ls.read_config()
-        ls.generate()
-
-        vtctld = VtCtld(public_hostname, ls)
-        vtctld.read_config()
-        vtctld.generate()
-
-        vtgate = VtGate(public_hostname, ls)
-        vtgate.read_config()
-        vtgate.generate()
-
-        dbcfg = DbConnectionTypes()
-        dbcfg.read_config()
-        dbcfg.generate()
-        vttablet = VtTablet(public_hostname, ls, dbcfg, vtctld)
-        vttablet.read_config()
-        vttablet.generate()
-
-
-            
-
 if __name__ == '__main__':
     main()
     
