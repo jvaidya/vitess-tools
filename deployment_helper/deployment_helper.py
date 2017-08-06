@@ -495,7 +495,7 @@ disown -a
 
 echo "Access vtctld web UI at http://${HOSTNAME}:${WEB_PORT}"
 echo "Send commands with: vtctlclient -server ${HOSTNAME}:${GRPC_PORT} ..."
-echo "Note: vtctld writes logs under $VTDATAROOT/tmp.
+echo Note: vtctld writes logs under $VTDATAROOT/tmp.
 """ % locals()
 
 class VtGate(HostClass):
@@ -561,7 +561,7 @@ $VTROOT/bin/vtgate \
   > $VTDATAROOT/tmp/vtgate.out 2>&1 &
 
 echo "Access vtgate at http://${HOSTNAME}:${WEB_PORT}/debug/status"
-echo "Note: vtgate writes logs under $VTDATAROOT/tmp.
+echo Note: vtgate writes logs under $VTDATAROOT/tmp.
 
 disown -a
 
@@ -789,7 +789,7 @@ for instance_number in $uids; do
     start_vttablet $instance_number
 done
 
-echo "Note: vttablet writes logs under $VTDATAROOT/tmp.
+echo Note: vttablet writes logs under $VTDATAROOT/tmp.
 
 disown -a
 
