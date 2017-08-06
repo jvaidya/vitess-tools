@@ -600,6 +600,10 @@ class VtTablet(HostClass):
         self.num_tablets = read_value('Enter the total number of tablets for this shard:', '4')
         self.num_replicas = read_value('Number of tablets of type "replica":', '2')
         self.num_rdonly = read_value('Number of tablets of type "rdonly":', '2')
+
+    def generate(self):
+        super(VtTablet, self).generate()
+        self.dbconfig.generate()
         
     def make_header(self):
         topology_flags = self.ls.topology_flags
