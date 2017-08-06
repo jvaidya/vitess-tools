@@ -10,8 +10,6 @@ import subprocess
 
 args = None
 
-DEPLOYMENT_DIR = os.path.expanduser('~/vitess-deployment')
-
 """
 Goal 1: Create up and down scripts for localhost.
 DEPLOYMENT_DIR/bin/
@@ -23,34 +21,39 @@ A config class that reads and writes from config.
 
 """
 
-CFGFILE = os.path.join(os.environ['VTDATAROOT'], 'deployment.json')
 VTROOT = None
 VTDATAROOT = None
+DEPLOYMENT_DIR = None
 CELL = None
 
-class ZkCell(object):
-    num_hosts = 0
-
-
 def check_host():
-    global VTROOT, VTDATAROOT
-    print """
+    global VTROOT, VTDATAROOT, DEPLOYMENT_DIR
+    VTROOT = os.environ.get('VTROOT')
+    VTDATAROOT = os.environ['VTDATAROOT']
+    if VTROOT is not None and VTDATAROOT is not None:
+        print 'VTROOT=%s' % VTROOT
+        print 'VTDATAROOT=%s' % VTDATAROOT
+    else:
+        print """
 We assume that you are running this on a host on which all the required vitess binaries exist
 and you have set the VTROOT and VTDATAROOT environment variable.
-VTROOT is the root of vitess installation. We expect to find the vitess binaries under VTROOT/bin and
-config files under VTROOT/config. This program too stores it's data files under VTROOT/config.
+VTROOT is the root of vitess installation. We expect to find the vitess binaries under VTROOT/bin.
+
 VTDATAROOT is where the mysql data files, backup files, log files etc. are stored. This would typically be
 on a partition where there is enough disk space for your data.
 """
-    VTROOT = os.environ.get('VTROOT') or read_value('Did not find VTROOT in environment. Enter VTROOT:')
-    VTDATAROOT = os.environ['VTDATAROOT'] or read_value('Did not find VTDATAROOT in environment. Enter VTDATAROOT:')
-    print 'VTROOT=%s' % VTROOT
-    print 'VTDATAROOT=%s' % VTDATAROOT
+        VTROOT = os.environ.get('VTROOT') or read_value('Did not find VTROOT in environment. Enter VTROOT:')
+        VTDATAROOT = os.environ['VTDATAROOT'] or read_value('Did not find VTDATAROOT in environment. Enter VTDATAROOT:')
+        print 'VTROOT=%s' % VTROOT
+        print 'VTDATAROOT=%s' % VTDATAROOT
+    DEPLOYMENT_DIR = os.path.join(VTROOT, 'vitess-deployment')
+    print 'DEPLOYMENT_DIR=%s' % DEPLOYMENT_DIR
     print
     
 g_local_hostname = socket.getfqdn()
 
 def read_value(prompt, prefill=''):
+
     if not prompt.endswith(' '):
         prompt += ' '
     readline.set_startup_hook(lambda: readline.insert_text(prefill))
@@ -101,7 +104,18 @@ class ConfigType(object):
 
     def read_config(self):
         config_file = self.get_config_file()
-        interactive = True
+        interactive = args.interactive
+        if not interactive:
+            if os.path.exists(config_file):
+                with open(config_file) as fh:
+                    self.__dict__.update(json.load(fh))
+                print 'Using: %s' % config_file
+                return
+            else:
+                print >> sys.stderr, 'ERROR: Could not find config file: %s'
+                print >> sys.stderr, 'ERROR: Run with --interactive to generate it.'
+                sys.exit(1)
+
         if os.path.exists(config_file):
             use_file = read_value('Config file "%s" exists, use that? :' % config_file, 'Y')
             interactive = use_file != 'Y'
@@ -150,18 +164,22 @@ class HostClass(ConfigType):
             print
     
     def get_hosts(self):
-        print """Please specify hosts to use for this component.
+        print 'Configured hosts = %s' % self.configured_hosts
+        print """Please specify additional hosts to use for this component.
 To specify hosts, you can enter hostnames seperated by commas or
 you can specify a file (one host per line) as "file:/path/to/file"."""
         public_hostname = get_public_hostname()
         host_prompt = 'Specify hosts for "%s":' % self.short_name        
         host_input = read_value(host_prompt, public_hostname)
-        if host_input.startswith('file:'):
+        if host_input.lower().startswith('file:'):
             _, path = host_input.split(':')
             with open(path) as fh:
-                self.configured_hosts = fh.readlines()
+                new_hosts = fh.readlines()
         else:
-            self.configured_hosts = host_input.split(':')
+            new_hosts = host_input.split(',')
+        for h in new_hosts:
+            if h not in self.configured_hosts:
+                self.configured_hosts.append(h)
 
     def read_config_interactive(self):
         raise NotImplemented
@@ -169,14 +187,47 @@ you can specify a file (one host per line) as "file:/path/to/file"."""
     def up_commands(self):
         raise NotImplemented
 
-    def write_files(self):
+    def generate(self):
         if self.up_filename:
             out = self.up_commands()
             write_bin_file(self.up_filename, out)
+            print 'Generated %s' % self.up_filename
         if self.down_filename:
             out = self.down_commands()
             write_bin_file(self.down_filename, out)
-        
+            print 'Generated %s' % self.down_filename            
+
+    def start(self):
+        start_command = os.path.join(DEPLOYMENT_DIR, 'bin', self.up_filename)
+        if args.interactive:
+            response = read_value('Run "%s" to start %s now? :' % (start_command, self.short_name), 'Y')
+        else:
+            response = 'Y'
+        if response == 'Y':
+            print 'Running: %s' % start_command
+            subprocess.call(['bash', start_command])
+
+    def stop(self):
+        stop_command = os.path.join(DEPLOYMENT_DIR, 'bin', self.down_filename)
+        if args.interactive:
+            response = read_value('Run "%s" to stop %s now? :' % (stop_command, self.short_name), 'Y')
+        else:
+            response = 'Y'
+        if response == 'Y':
+            print 'Running: %s' % stop_command
+            subprocess.call(['bash', stop_command])
+
+    def run_action(self, action):
+        if action == 'generate':
+            self.generate()
+        elif action == 'start':
+            self.start()
+        elif action == 'stop':
+            self.stop()
+        else:
+            print 'ERRROR: action "%s" is not defined in %s' % (action, self)
+            sys.exit(1)
+            
 class Deployment(object):
     pass
 
@@ -185,6 +236,21 @@ class LockServer(HostClass):
     def __init__(self):
         self.ls = None
         self.ls_type = None
+        if args.vtctld_addr is not None:
+            self.init_from_vtctld(args.vtctld_addr)
+        else:
+            set_cell('test')
+            self.read_config()
+
+    def init_from_vtctld(self, vtctld_endpoint):
+        print 'Connecting to vtctld to get topological information at "%s".' % vtctld_endpoint
+        cmd = ['vtctlclient', '-server', vtctld_endpoint, 'GetCellInfoNames']
+        cells = [ c for c in subprocess.check_output(cmd).split('\n') if c]
+        print 'Found cells: %s' % cells
+        set_cell(cells[0])
+        cmd = ['vtctlclient', '-server', vtctld_endpoint, 'GetCellInfo', CELL]
+        cell_info = json.loads(subprocess.check_output(cmd))
+        self.set_topology_from_vtctld(cell_info)
         
     def read_config_interactive(self):
         print 'Vitess supports two types of lockservers, zookeeper (zk2) and etcd (etcd)'
@@ -205,8 +271,8 @@ class LockServer(HostClass):
         self.topology_flags = self.ls.topology_flags
         self.num_instances = self.ls.num_instances
         
-    def write_files(self):
-        self.ls.write_files()
+    def generate(self):
+        self.ls.generate()
 
     def set_topology_from_vtctld(self, cell_info):
         if '21811' in cell_info['server_address']:
@@ -370,7 +436,9 @@ The vtctld server also accepts commands from the vtctlclient tool, which is used
         self.hostname = hostname
         self.ls = ls
         self.ports = dict(web_port=15000, grpc_port=15999)
-
+        if args.vtctld_addr is None:
+            self.read_config()
+        
     def read_config_interactive(self):
         pass
 
@@ -436,7 +504,8 @@ class VtGate(HostClass):
         self.hostname = hostname
         self.ls = ls
         self.ports = dict(web_port=15001, grpc_port=15991, mysql_server_port=15306)
-
+        self.read_config()
+        
     def read_config_interactive(self):
         pass
 
@@ -505,6 +574,7 @@ class VtTablet(HostClass):
         self.ls = ls
         self.dbconfig = dbconfig
         self.vtctld = vtctld
+        self.read_config()
 
     def read_config_interactive(self):
         # Read number of 'readonly' tablets
@@ -765,7 +835,8 @@ class DbConnectionTypes(ConfigType):
         self.vars = {}
         self.db_types = DB_USERS.keys()
         self.init_file = 'init_db.sql'
-
+        self.read_config()
+        
     def read_config_interactive(self):
         print
         print 'Vitess uses a "Sidecar Database" to store metadata.'
@@ -802,7 +873,7 @@ class DbConnectionTypes(ConfigType):
                 default = default % locals()
             self.dbconfig['global'][param] = read_value('Enter "%s":' % param, default) 
 
-    def write_files(self):
+    def generate(self):
         out = self.make_init_db_sql()
         write_dep_file('config', self.init_file, out)
         
@@ -924,18 +995,20 @@ FLUSH PRIVILEGES;
         # write init_db.sql
         # set INIT_DB_SQL_FILE
 
+ACTION_CHOICES = ['configure', 'generate', 'start', 'stop', 'report', 'run_demo']
+COMPONENT_CHOICES = ['lockserver', 'vtctld', 'vttablet', 'vtgate', 'all']
+
 def define_args():
     ap = argparse.ArgumentParser('Vitess Cluster Management helper.')
-    actions = ['configure', 'generate', 'start', 'stop', 'report', 'run_demo']
-    components = ['lockserver', 'vtctld', 'vttablets', 'vtgate', 'all']
+
     ap.add_argument('--action', default='configure',
-                     choices=actions,
+                     choices=ACTION_CHOICES,
                      nargs='*',
                      help='Specify action[s]')
 
     ap.add_argument('--component', default='all',
                     nargs='*',
-                    choices=components,
+                    choices=COMPONENT_CHOICES,
                     help='Specify the component[s] to act on.')
 
     ap.add_argument('--interactive', type=str2bool, nargs='?',
@@ -1362,6 +1435,75 @@ def main():
     global args
     parser = define_args()
     args = parser.parse_args()
+    actions = args.action
+    components = args.component
+    
+    if type(actions) is str:
+        actions = [actions]
+    if type(components) is str:
+        components = [components]
+    if 'run_demo' in actions:
+        actions = ['generate', 'run_demo']
+        # the default for components is 'all' which is what we want.
+    if 'all' in components:
+        components = COMPONENT_CHOICES
+        components.remove('all')
+
+    print 'Will perform the action[s]: %s' % ' '.join(['"%s"' % a for a in actions])
+    print 'On component[s]: %s' % ' '.join(['"%s"' % c for c in components])
+    print
+    public_hostname = get_public_hostname()
+    check_host()
+    c_instances = {}
+    c_instances['lockserver'] = LockServer()
+    if 'vtctld' in components or 'vttablet' in components:
+        c_instances['vtctld'] = VtCtld(public_hostname, c_instances['lockserver'])
+    if 'vtgate' in components:
+        c_instances['vtgate'] = VtGate(public_hostname, c_instances['lockserver'])
+    if 'vttablet' in components:
+        c_instances['dbcfg'] = DbConnectionTypes()
+        c_instances['vttablet'] = VtTablet(public_hostname, c_instances['lockserver'], c_instances['dbcfg'], c_instances['vtctld'])
+    # TODO: sort actions
+    # TODO: sort components
+    for action in actions:
+        if action == 'run_demo':
+            continue
+        for component in components:
+            c_instances[component].run_action(action)
+    for cname in components:
+        c = c_instances[cname]
+        print '\t%s' % c.up_filename
+        print '\t%s' % c.down_filename
+    if 'run_demo' in actions:
+            run_demo(public_hostname, c_instances['lockserver'], c_instances['vtctld'])
+            
+def run_demo(public_hostname, ls, vtctld):
+    create_start_local_cluster(public_hostname)
+    create_destroy_local_cluster()
+    create_sharding_workflow_script(ls, vtctld)
+    print 'The following scripts were generated under: %s' % os.path.join(DEPLOYMENT_DIR, 'bin')    
+    print '\t%s' % 'start_local_cluster.sh'
+    print '\t%s' % 'destroy_local_cluster.sh'
+    print '\t%s' % 'run_sharding_workflow.sh'        
+    print
+    # print 'Note: Vitess binaries create log files under: %s' % os.path.join(VTDATAROOT, 'tmp')
+
+    start_local = os.path.join(DEPLOYMENT_DIR, 'bin', 'start_local_cluster.sh')
+    response = read_value('Run "%s" to start local cluster now? :' % start_local, 'Y')
+    if response == 'Y':
+        subprocess.call(['bash', start_local])
+
+    print
+        
+    run_sharding = os.path.join(DEPLOYMENT_DIR, 'bin', 'run_sharding_workflow.sh')
+    response = read_value('Run "%s" to demo sharding workflow now? :' % start_local, 'Y')
+    if response == 'Y':
+        subprocess.call(['bash', run_sharding])                    
+    
+def main_orig():
+    global args
+    parser = define_args()
+    args = parser.parse_args()
     
     public_hostname = get_public_hostname()
     print 'This host is:'
@@ -1395,10 +1537,10 @@ def main():
         vtctld = VtCtld(vtctld_host, ls)
         dbcfg = DbConnectionTypes()
         dbcfg.read_config()
-        dbcfg.write_files()
+        dbcfg.generate()
         vttablet = VtTablet(public_hostname, ls, dbcfg, vtctld)
         vttablet.read_config()
-        vttablet.write_files()
+        vttablet.generate()
         print
         print 'The following scripts were generated under: %s' % DEPLOYMENT_DIR
         for c in [vttablet]:
@@ -1412,51 +1554,25 @@ def main():
         set_cell('test')
         ls = LockServer()
         ls.read_config()
-        ls.write_files()
+        ls.generate()
 
         vtctld = VtCtld(public_hostname, ls)
-        #vtctld = VtCtld(local_hostname, ls)
         vtctld.read_config()
-        vtctld.write_files()
+        vtctld.generate()
 
         vtgate = VtGate(public_hostname, ls)
-        #vtgate = VtGate(local_hostname, ls)        
         vtgate.read_config()
-        vtgate.write_files()
+        vtgate.generate()
 
         dbcfg = DbConnectionTypes()
         dbcfg.read_config()
-        dbcfg.write_files()
+        dbcfg.generate()
         vttablet = VtTablet(public_hostname, ls, dbcfg, vtctld)
         vttablet.read_config()
-        vttablet.write_files()
+        vttablet.generate()
 
-        create_start_local_cluster(public_hostname)
-        create_destroy_local_cluster()
-        create_sharding_workflow_script(ls, vtctld)
-        
-        print
-        print 'The following scripts were generated under: %s' % DEPLOYMENT_DIR
-        for c in [ls.ls, vtctld, vttablet, vtgate]:
-            print '\t%s' % c.up_filename
-            print '\t%s' % c.down_filename
-        print '\t%s' % 'start_local_cluster.sh'
-        print '\t%s' % 'destroy_local_cluster.sh'
-        print '\t%s' % 'run_sharding_workflow.sh'        
-        print
-        # print 'Note: Vitess binaries create log files under: %s' % os.path.join(VTDATAROOT, 'tmp')
 
-        start_local = os.path.join(DEPLOYMENT_DIR, 'bin', 'start_local_cluster.sh')
-        response = read_value('Run "%s" to start local cluster now? :' % start_local, 'Y')
-        if response == 'Y':
-            subprocess.call(['bash', start_local])
-
-        print
-        
-        run_sharding = os.path.join(DEPLOYMENT_DIR, 'bin', 'run_sharding_workflow.sh')
-        response = read_value('Run "%s" to demo sharding workflow now? :' % start_local, 'Y')
-        if response == 'Y':
-            subprocess.call(['bash', run_sharding])                    
+            
 
 if __name__ == '__main__':
     main()
