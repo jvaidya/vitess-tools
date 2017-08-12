@@ -1,4 +1,7 @@
 
+mkdir -p $VTDATAROOT/tmp
+mkdir -p $VTDATAROOT/backups
+
 # Start vtgate.
 $VTROOT/bin/vtgate \
   $TOPOLOGY_FLAGS \

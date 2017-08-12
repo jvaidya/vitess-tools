@@ -101,31 +101,17 @@ class ConfigType(object):
     Written to a config file.
     Is prompted for and read from user input.
     """
-    configured_hosts = []
     ConfigTypes = [types.DictType, types.StringType, types.ListType, types.IntType]
-    WritableParentAttributes = ['configured_hosts']
+
     def get_config_file(self):
         config_dir = os.path.join(DEPLOYMENT_DIR, 'config')
         return os.path.join(config_dir, '%s.json' % self.short_name)
-
-    def get_writable_attributes(self):
-        out = { k: self.__dict__[k] for k in self.__dict__ if type(self.__dict__[k]) in self.ConfigTypes }
-        for parent in self.__class__.__bases__:
-            for k in parent.__dict__:
-                if k not in self.WritableParentAttributes:
-                    print 'NOT Writing %s' % k
-                    continue
-                print 'Writing %s' % k
-                v = parent.__dict__[k]
-                if type(v) in self.ConfigTypes:
-                    out[k] = v
-        return out
 
     def write_config(self):
         config_file = self.get_config_file()
         if not os.path.exists(os.path.dirname(config_file)):
             os.makedirs(os.path.dirname(config_file))
-        out = self.get_writable_attributes()
+        out = { k: self.__dict__[k] for k in self.__dict__ if type(self.__dict__[k]) in self.ConfigTypes }
         try:
             with open(config_file, 'w') as fh:
                 json.dump(out, fh, indent=4, separators=(',', ': '))
@@ -179,7 +165,6 @@ class HostClass(ConfigType):
     hardware_recommendation = ""
     host_number_calculation = ""
     num_recommended_hosts = 0
-    configured_hosts = []
 
     def read_config(self, show_prologue=True):
         if show_prologue:
@@ -310,6 +295,7 @@ class LockServer(HostClass):
         self.ls = None
         self.get_hosts = None
         self.ls_type = None
+        self.configured_hosts = []
         if args.vtctld_addr is not None:
             self.init_from_vtctld(args.vtctld_addr)
         else:
@@ -373,6 +359,7 @@ on 3 different hosts. If you are running the local cluster demo, you can run all
     def __init__(self):
         self.hosts = []
         self.zk_config = []
+        self.configured_hosts = []
 
     def get_default_host(self, i):
         return self.configured_hosts[i % len(self.configured_hosts)]
@@ -532,6 +519,7 @@ The vtctld server also accepts commands from the vtctlclient tool, which is used
         self.hostname = hostname
         self.ls = ls
         self.ports = dict(web_port=15000, grpc_port=15999)
+        self.configured_hosts = []
         if args.vtctld_addr is None:
             self.read_config()
 
@@ -597,6 +585,7 @@ class VtGate(HostClass):
         self.hostname = hostname
         self.ls = ls
         self.ports = dict(web_port=15001, grpc_port=15991, mysql_server_port=15306)
+        self.configured_hosts = []
         self.read_config()
 
     def read_config_interactive(self):
@@ -735,6 +724,7 @@ class VtTablet(HostClass):
         self.hostname = hostname
         self.ls = ls
         self.vtctld = vtctld
+        self.configured_hosts = []
         self.read_config()
         if args.add:
             self.read_config_add()

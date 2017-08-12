@@ -3,6 +3,7 @@
 echo "Starting vtctld..."
 
 mkdir -p $VTDATAROOT/backups
+mkdir -p $VTDATAROOT/tmp
 
 ${VTROOT}/bin/vtctld \
   ${TOPOLOGY_FLAGS} \

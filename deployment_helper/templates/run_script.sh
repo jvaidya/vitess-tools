@@ -12,19 +12,24 @@ function check_ssh()
 
 function is_local()
 {
-    cmd_hostname=$1
-    hostname=$(hostname)
-    if [ $cmd_hostname == $hostname ]; then
+    cmd_host=$1
+    host=$(hostname -f)
+    if [ $cmd_host == $host ]; then
 	echo 1
 	return
     fi
-    hostname=$(hostname -i)
-    if [ $cmd_hostname == $hostname ]; then
+    host=$(hostname)
+    if [ $cmd_host == $host ]; then
 	echo 1
 	return
     fi
-    hostname=$(curl -s $AWS_PUBLIC_HOSTNAME_URL)
-    if [ $cmd_hostname == $hostname ]; then
+    host=$(hostname -i)
+    if [ $cmd_host == $host ]; then
+	echo 1
+	return
+    fi
+    host=$(curl -s $AWS_PUBLIC_HOSTNAME_URL)
+    if [ $cmd_host == $host ]; then
 	echo 1
 	return
     fi
