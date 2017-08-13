@@ -741,7 +741,6 @@ class VtTablet(HostClass):
     offset_base = 100
     shard_config = {}
     shards = []
-    shard_sets = []
     tablets = []
     base_ports = dict(web=15100, grpc=16100, mysql=17100)
     tablet_types = ['master', 'replica', 'rdonly']
@@ -751,6 +750,7 @@ class VtTablet(HostClass):
         self.ls = ls
         self.vtctld = vtctld
         self.configured_hosts = []
+        self.shard_sets = []
         self.read_config()
         if args.add:
             self.read_config_add()
