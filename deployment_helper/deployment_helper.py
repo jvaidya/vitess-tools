@@ -1531,7 +1531,7 @@ done
 
 cat << EOF
 
-Now, if we run the following command, we  should be able to see tablets for all 3 shards.
+Now, if we run the following command, we  should be able to see tablets for all old and new shards.
 
 EOF
 
@@ -1546,7 +1546,7 @@ for shard in $new_shards; do
 done
 
 cat << EOF
-Now there should be a total of 15 tablets, with one master for each shard:
+Now there should be multiple tablets per shard, with one master for each shard:
 EOF
 
 run_interactive "vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s"
