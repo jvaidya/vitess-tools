@@ -1335,7 +1335,7 @@ echo
 echo Note: In this example setup, backups are stored at $VTDATAROOT/backups. In a multi-server deployment, you would usually mount an NFS directory there. You can also change the location by setting the -file_backup_storage_root flag on vtctld and vttablet
 
 echo Initialize Vitess Routing Schema
-if [ $num_orig_shards -eq 1]; then
+if [ $num_orig_shards -eq 1 ]; then
 echo "In the examples, we are just using a single database with no specific configuration. So we just need to make that (empty) configuration visible for serving. This is done by running the following command:"
 run_interactive "vtctlclient -server %(vtctld_host)s:15999 RebuildVSchemaGraph"
 else
