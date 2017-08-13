@@ -1227,8 +1227,17 @@ def define_args():
                     help='Specify vtctld-addr (useful in non-interactive mode).')
     return ap
 
-def create_start_cluster(hostname):
+def create_start_cluster(vtctld_host, vtgate_host, tablets):
     cell = CELL
+    tlines = []
+    for t in tablets:
+        alias = t['alias']
+        host = t['host']
+        web_port = t['web_port']
+        l = '\tAccess tablet %(alias)s at http://%(host)s:%(web_port)s/debug/status' % locals()
+        tlines.append(l)
+    tablet_urls = '\n'.join(tlines)
+
     template = r"""#!/bin/bash
 # This script starts a local cluster.
 
@@ -1248,7 +1257,7 @@ function run_interactive()
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo
-echo This script will walk you through starting a local vitess cluster.
+echo This script will walk you through starting a vitess cluster.
 echo
 echo Servers in a Vitess cluster find each other by looking for dynamic configuration data stored in a distributed lock service.
 echo After the ZooKeeper cluster is running, we only need to tell each Vitess process how to connect to ZooKeeper.
@@ -1256,7 +1265,7 @@ echo Then, each process can find all of the other Vitess processes by coordinati
 
 echo Each of our scripts automatically uses the TOPOLOGY_FLAGS environment variable to point to the global ZooKeeper instance.
 echo The global instance in turn is configured to point to the local instance.
-echo In our sample scripts, they are both hosted in the same ZooKeeper service.
+echo This demo assumes that they are both hosted in the same ZooKeeper service.
 
 echo
 run_interactive "$DIR/zk-up.sh"
@@ -1267,7 +1276,7 @@ echo
 run_interactive "$DIR/vtctld-up.sh"
 
 echo
-echo Open http://%(hostname)s:15000 to verify that vtctld is running.
+echo Open http://%(vtctld_host)s:15000 to verify that vtctld is running.
 echo "There won't be any information there yet, but the menu should come up, which indicates that vtctld is running."
 
 echo The vtctld server also accepts commands from the vtctlclient tool, which is used to administer the cluster.
@@ -1283,31 +1292,31 @@ echo Next, designate one of the tablets to be the initial master.
 echo Vitess will automatically connect the other slaves' mysqld instances so that they start replicating from the master's mysqld.
 echo This is also when the default database is created. Since our keyspace is named %(cell)s_keyspace, the MySQL database will be named vt_%(cell)s_keyspace.
 echo
-run_interactive "vtctlclient -server %(hostname)s:15999 InitShardMaster -force %(cell)s_keyspace/0 %(cell)s-100"
+run_interactive "vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force %(cell)s_keyspace/0 %(cell)s-100"
 echo
 echo After running this command, go back to the Shard Status page in the vtctld web interface.
 echo When you refresh the page, you should see that one vttablet is the master and the other two are replicas.
 echo
 echo You can also see this on the command line:
 echo
-run_interactive "vtctlclient -server %(hostname)s:15999 ListAllTablets %(cell)s"
+run_interactive "vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s"
 echo
 echo The vtctlclient tool can be used to apply the database schema across all tablets in a keyspace.
 echo The following command creates the table defined in the create_test_table.sql file
-run_interactive 'vtctlclient -server %(hostname)s:15999 ApplySchema -sql "$(cat $VTTOP/examples/local/create_test_table.sql)" %(cell)s_keyspace'
+run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ApplySchema -sql "$(cat $VTTOP/examples/local/create_test_table.sql)" %(cell)s_keyspace'
 echo
 echo "Now that the initial schema is applied, it's a good time to take the first backup. This backup will be used to automatically restore any additional replicas that you run, before they connect themselves to the master and catch up on replication. If an existing tablet goes down and comes back up without its data, it will also automatically restore from the latest backup and then resume replication."
-run_interactive "vtctlclient -server %(hostname)s:15999 Backup %(cell)s-0000000102"
+run_interactive "vtctlclient -server %(vtctld_host)s:15999 Backup %(cell)s-0000000102"
 echo
 echo After the backup completes, you can list available backups for the shard:
-run_interactive "vtctlclient -server %(hostname)s:15999 ListBackups %(cell)s_keyspace/0"
+run_interactive "vtctlclient -server %(vtctld_host)s:15999 ListBackups %(cell)s_keyspace/0"
 echo
 echo
 echo Note: In this single-server example setup, backups are stored at $VTDATAROOT/backups. In a multi-server deployment, you would usually mount an NFS directory there. You can also change the location by setting the -file_backup_storage_root flag on vtctld and vttablet
 
 echo Initialize Vitess Routing Schema
 echo "In the examples, we are just using a single database with no specific configuration. So we just need to make that (empty) configuration visible for serving. This is done by running the following command:"
-run_interactive "vtctlclient -server %(hostname)s:15999 RebuildVSchemaGraph"
+run_interactive "vtctlclient -server %(vtctld_host)s:15999 RebuildVSchemaGraph"
 
 echo Start vtgate
 
@@ -1324,15 +1333,13 @@ echo
 cat << EOF
 You can now explore the cluster:
 
-    Access vtctld web UI at http://%(hostname)s:15000
-    Send commands to vtctld with: vtctlclient -server %(hostname)s:15999 ...
-    Try "vtctlclient -server %(hostname)s:15999 help".
+    Access vtctld web UI at http://%(vtctld_host)s:15000
+    Send commands to vtctld with: vtctlclient -server %(vtctld_host)s:15999 ...
+    Try "vtctlclient -server %(vtctld_host)s:15999 help".
 
-    Access tablet %(cell)s-0000000100 at http://%(hostname)s:15100/debug/status
-    Access tablet %(cell)s-0000000101 at http://%(hostname)s:15101/debug/status
-    Access tablet %(cell)s-0000000102 at http://%(hostname)s:15102/debug/status
+%(tablet_urls)s
 
-    Access vtgate at http://%(hostname)s:15001/debug/status
+    Access vtgate at http://%(vtgate_host)s:15001/debug/status
     Connect to vtgate either at grpc_port or mysql_port and run queries against vitess.
 
     Note: Vitess binaries write write logs under $VTDATAROOT/tmp.
@@ -1674,10 +1681,10 @@ def main():
             c_instances[component].run_action(action)
 
     if 'run_demo' in actions:
-            run_demo(public_hostname, c_instances['lockserver'], c_instances['vtctld'])
+            run_demo(c_instances['lockserver'], c_instances['vtctld'], c_instances['vtgate'], c_instances['vttablet'])
 
-def run_demo(public_hostname, ls, vtctld):
-    create_start_cluster(public_hostname)
+def run_demo(ls, vtctld, vtgate, vttablets):
+    create_start_cluster(vtctld.hostname, vtgate.hostname, vttablets.tablets)
     create_destroy_cluster()
     create_sharding_workflow_script(ls, vtctld)
     print '\t%s' % 'start_cluster.sh'
