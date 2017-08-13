@@ -80,4 +80,4 @@ function run_script_file()
 
 VERBOSE=0
 
-#run_script_file $1 $2 $3
+run_script_file $1 $2 $3

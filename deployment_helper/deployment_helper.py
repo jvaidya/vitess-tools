@@ -17,6 +17,7 @@ VTTOP = None
 MYSQL_FLAVOR = None
 DEPLOYMENT_DIR = None
 CELL = None
+DEPLOYMENT_HELPER_DIR = os.path.abspath(os.path.dirname(__file__))
 
 """
 Add cell?
@@ -26,8 +27,17 @@ Add vtctld?
 init_cell different from zk-up.sh?
 """
 
+made_script_file = None
+
+def make_run_script_file():
+    global made_script_file
+    if made_script_file is None:
+        template = read_template('run_script_on_host.sh')
+        made_script_file = write_bin_file('run_script_on_host.sh', template)
+    return made_script_file
+
 def read_template(filename):
-    dirpath = os.path.join(os.path.dirname(__file__), 'templates')
+    dirpath = os.path.join(DEPLOYMENT_HELPER_DIR, 'templates')
     with open(os.path.join(dirpath, filename)) as fh:
         return ''.join(fh.readlines())
 
@@ -71,7 +81,7 @@ MYSQL_FLAVOR should be one of MariaDB or MySQL56.
 
 g_local_hostname = socket.getfqdn()
 
-def read_value(prompt, default=''):
+def read_value_orig(prompt, default=''):
     if not prompt.endswith(' '):
         prompt += ' '
     if type(default) is int:
@@ -81,6 +91,17 @@ def read_value(prompt, default=''):
         return raw_input(prompt).strip()
     finally:
         readline.set_startup_hook()
+
+def read_value(prompt, default=''):
+    if not prompt.endswith(' '):
+        prompt += ' '
+    if type(default) is int:
+        default = str(default)
+    prompt = '%s [%s]:' % (prompt, default)
+    val = raw_input(prompt).strip()
+    if not val:
+        val = default
+    return val
 
 def set_cell(default):
     global CELL
@@ -123,7 +144,7 @@ class ConfigType(object):
 
     def read_config(self):
         config_file = self.get_config_file()
-        interactive = args.interactive
+        interactive = not args.use_config_without_prompt
         if not interactive:
             if os.path.exists(config_file):
                 with open(config_file) as fh:
@@ -197,6 +218,10 @@ you can specify a file (one host per line) as "file:/path/to/file"."""
         host_input = read_value(host_prompt, public_hostname)
         if host_input.lower().startswith('file:'):
             _, path = host_input.split(':')
+            while not os.path.isfile(path):
+                print 'Could not find file: "%s"' % path
+                host_input = read_value(host_prompt, host_input)
+                _, path = host_input.split(':')
             with open(path) as fh:
                 new_hosts = [l.strip() for l in fh.readlines()]
         else:
@@ -438,8 +463,8 @@ CELL="%(cell)s"
 """ % locals()
 
     def down_commands(self):
-        template = read_template('run_script.sh')
-        out = [template] + [self.make_header()]
+        script_file = make_run_script_file()
+        out = [self.make_header()]
         out.append('echo "Stopping zk servers..."')
         for i, (host, zk_ports) in enumerate(self.zk_config):
             count = i + 1
@@ -447,13 +472,13 @@ CELL="%(cell)s"
             script = self.write_instance_script(count, host, "down")
             # Write line to call this
             out.append('')
-            out.append('run_script_file %s %s' % (host, script))
+            out.append('%s %s %s' % (script_file, host, script))
         out.append('')
         return '\n'.join(out)
 
     def up_commands(self):
-        template = read_template('run_script.sh')
-        out = [template] + [self.make_header()]
+        script_file = make_run_script_file()
+        out = [self.make_header()]
         out.append('echo "Starting zk servers..."')
         for i, (host, zk_ports) in enumerate(self.zk_config):
             count = i + 1
@@ -461,7 +486,7 @@ CELL="%(cell)s"
             script = self.write_instance_script(count, host, "up")
             # Write line to call this
             out.append('')
-            out.append('run_script_file %s %s' % (host, script))
+            out.append('%s %s %s' % (script_file, host, script))
             out.append('')
         out.append('')
         out.append('# Create /vitess/global and /vitess/CELLNAME paths if they do not exist.')
@@ -540,7 +565,7 @@ The vtctld server also accepts commands from the vtctlclient tool, which is used
             action = 'Starting'
         else:
             action = 'Stopping'
-        template = read_template('run_script.sh')
+        script_file = make_run_script_file()
         out = []
         out.append('#!/bin/bash')
         out.append('')
@@ -548,9 +573,9 @@ The vtctld server also accepts commands from the vtctlclient tool, which is used
         for i, host in enumerate(self.configured_hosts):
             script = self.write_instance_script(i, host, ftype)
             out.append('')
-            out.append('run_script_file %s %s' % (host, script))
+            out.append('%s %s %s' % (script_file, host, script))
         out.append('')
-        return template + '\n'.join(out)
+        return '\n'.join(out)
 
     def instance_header_up(self, i):
         return self.instance_header()
@@ -605,7 +630,7 @@ class VtGate(HostClass):
             action = 'Starting'
         else:
             action = 'Stopping'
-        template = read_template('run_script.sh')
+        script_file = make_run_script_file()
         out = []
         out.append('#!/bin/bash')
         out.append('')
@@ -613,9 +638,9 @@ class VtGate(HostClass):
         for i, host in enumerate(self.configured_hosts):
             script = self.write_instance_script(i, host, ftype)
             out.append('')
-            out.append('run_script_file %s %s' % (host, script))
+            out.append('%s %s %s' % (script_file, host, script))
         out.append('')
-        return template + '\n'.join(out)
+        return '\n'.join(out)
 
     def instance_header_up(self, i):
         return self.instance_header()
@@ -716,6 +741,7 @@ class VtTablet(HostClass):
     offset_base = 100
     shard_config = {}
     shards = []
+    shard_sets = []
     tablets = []
     base_ports = dict(web=15100, grpc=16100, mysql=17100)
     tablet_types = ['master', 'replica', 'rdonly']
@@ -743,6 +769,7 @@ class VtTablet(HostClass):
         default_shards = ','.join(new_shard_candidates)
         new_shards_read = read_value('Enter shard names seperated by commas "0", "-80" "80-" etc.:', default_shards)
         new_shards = new_shards_read.split(',')
+        self.shard_sets.append(new_shards)
         all_shards = self.shards + new_shards
 
         print
@@ -899,7 +926,7 @@ TABLET_TYPE=%(ttype)s
         return 'vttablet-%s-instance-%s.sh' % (ftype, tablet['unique_id'])
 
     def down_commands_shard(self, shard):
-        template = read_template('run_script.sh')
+        script_file = make_run_script_file()
         out = []
         out.append('#!/bin/bash')
         out.append('')
@@ -910,12 +937,12 @@ TABLET_TYPE=%(ttype)s
                 continue
             script = self.write_instance_script(tablet, tablet['host'], "down")
             out.append('')
-            out.append('run_script_file %s %s' % (tablet['host'], script))
+            out.append('%s %s %s' % (script_file, tablet['host'], script))
         out.append('')
-        return template + '\n'.join(out)
+        return '\n'.join(out)
 
     def up_commands_shard(self, shard):
-        template = read_template('run_script.sh')
+        script_file = make_run_script_file()
         out = []
         out.append('#!/bin/bash')
         out.append('')
@@ -926,10 +953,9 @@ TABLET_TYPE=%(ttype)s
                 continue
             script = self.write_instance_script(tablet, tablet['host'], "up")
             out.append('')
-            out.append('run_script_file %s %s %s' % (tablet['host'], script, init_db_sql))
+            out.append('%s %s %s %s' % (script_file, tablet['host'], script, init_db_sql))
         out.append('')
-        return template + '\n'.join(out)
-
+        return '\n'.join(out)
 
     def up_commands(self):
         out = []
@@ -1185,6 +1211,10 @@ def define_args():
                     default=True, const=True,
                     help='Turn interactive mode on or off.')
 
+    ap.add_argument('--use-config-without-prompt', type=str2bool, nargs='?',
+                    default=False, const=True,
+                    help='If we find a config, use it without asking.')
+
     ap.add_argument('--verbose', type=str2bool, nargs='?',
                     default=True, const=True,
                     help='Turn verbose mode on or off.')
@@ -1202,6 +1232,19 @@ def create_start_cluster(hostname):
     template = r"""#!/bin/bash
 # This script starts a local cluster.
 
+function run_interactive()
+{
+    command=$1
+    prompt=${2:-"Run this command? (Y/n):"}
+    echo $command
+    read -p "$prompt" response
+    if echo "$response" | grep -iq "^n" ; then
+	echo Not running: $command
+    else
+	eval $command
+    fi
+}
+
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo
@@ -1216,16 +1259,12 @@ echo The global instance in turn is configured to point to the local instance.
 echo In our sample scripts, they are both hosted in the same ZooKeeper service.
 
 echo
-echo $DIR/zk-up.sh
-read -p "Hit Enter to run the above command ..."
-$DIR/zk-up.sh
+run_interactive "$DIR/zk-up.sh"
 
 echo
 echo The vtctld server provides a web interface that displays all of the coordination information stored in ZooKeeper.
 echo
-echo $DIR/vtctld-up.sh
-read -p "Hit Enter to run the above command ..."
-$DIR/vtctld-up.sh
+run_interactive "$DIR/vtctld-up.sh"
 
 echo
 echo Open http://%(hostname)s:15000 to verify that vtctld is running.
@@ -1238,58 +1277,43 @@ echo
 echo
 echo The vttablet-up.sh script brings up vttablets, for all shards
 echo
-echo $DIR/vttablet-up.sh
-echo
-read -p "Hit Enter to run the above command ..."
-$DIR/vttablet-up.sh
+run_interactive "$DIR/vttablet-up.sh"
 echo
 echo Next, designate one of the tablets to be the initial master.
 echo Vitess will automatically connect the other slaves' mysqld instances so that they start replicating from the master's mysqld.
 echo This is also when the default database is created. Since our keyspace is named %(cell)s_keyspace, the MySQL database will be named vt_%(cell)s_keyspace.
 echo
-echo vtctlclient -server %(hostname)s:15999 InitShardMaster -force %(cell)s_keyspace/0 %(cell)s-100
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(hostname)s:15999 InitShardMaster -force %(cell)s_keyspace/0 %(cell)s-100
+run_interactive "vtctlclient -server %(hostname)s:15999 InitShardMaster -force %(cell)s_keyspace/0 %(cell)s-100"
 echo
 echo After running this command, go back to the Shard Status page in the vtctld web interface.
 echo When you refresh the page, you should see that one vttablet is the master and the other two are replicas.
 echo
 echo You can also see this on the command line:
 echo
-echo vtctlclient -server %(hostname)s:15999 ListAllTablets %(cell)s
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(hostname)s:15999 ListAllTablets %(cell)s
+run_interactive "vtctlclient -server %(hostname)s:15999 ListAllTablets %(cell)s"
 echo
 echo The vtctlclient tool can be used to apply the database schema across all tablets in a keyspace.
 echo The following command creates the table defined in the create_test_table.sql file
-echo vtctlclient -server %(hostname)s:15999 ApplySchema -sql "$(cat $VTTOP/examples/local/create_test_table.sql)" %(cell)s_keyspace
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(hostname)s:15999 ApplySchema -sql "$(cat $VTTOP/examples/local/create_test_table.sql)" %(cell)s_keyspace
+run_interactive 'vtctlclient -server %(hostname)s:15999 ApplySchema -sql "$(cat $VTTOP/examples/local/create_test_table.sql)" %(cell)s_keyspace'
 echo
 echo "Now that the initial schema is applied, it's a good time to take the first backup. This backup will be used to automatically restore any additional replicas that you run, before they connect themselves to the master and catch up on replication. If an existing tablet goes down and comes back up without its data, it will also automatically restore from the latest backup and then resume replication."
-echo vtctlclient -server %(hostname)s:15999 Backup %(cell)s-0000000102
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(hostname)s:15999 Backup %(cell)s-0000000102
+run_interactive "vtctlclient -server %(hostname)s:15999 Backup %(cell)s-0000000102"
 echo
 echo After the backup completes, you can list available backups for the shard:
-echo vtctlclient -server %(hostname)s:15999 ListBackups %(cell)s_keyspace/0
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(hostname)s:15999 ListBackups %(cell)s_keyspace/0
+run_interactive "vtctlclient -server %(hostname)s:15999 ListBackups %(cell)s_keyspace/0"
 echo
 echo
 echo Note: In this single-server example setup, backups are stored at $VTDATAROOT/backups. In a multi-server deployment, you would usually mount an NFS directory there. You can also change the location by setting the -file_backup_storage_root flag on vtctld and vttablet
 
 echo Initialize Vitess Routing Schema
 echo "In the examples, we are just using a single database with no specific configuration. So we just need to make that (empty) configuration visible for serving. This is done by running the following command:"
-echo vtctlclient -server %(hostname)s:15999 RebuildVSchemaGraph
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(hostname)s:15999 RebuildVSchemaGraph
+run_interactive "vtctlclient -server %(hostname)s:15999 RebuildVSchemaGraph"
 
 echo Start vtgate
 
 echo Vitess uses vtgate to route each client query to the correct vttablet. This local example runs a single vtgate instance, though a real deployment would likely run multiple vtgate instances to share the load.
 
-$DIR/vtgate-up.sh
+run_interactive "$DIR/vtgate-up.sh"
 
 echo Run a simple client application that connects to vtgate and inserst some rows:
 for i in `seq 4`; do $VTTOP/examples/local/client.sh; done
@@ -1360,9 +1384,10 @@ def create_sharding_workflow_script(ls, vtctld):
     topology_flags = ls.topology_flags
     vtctld_host = vtctld.hostname
     cell = CELL
+    deployment_dir = DEPLOYMENT_DIR
+    deployment_helper_dir = DEPLOYMENT_HELPER_DIR
     vtworker = """#!/bin/bash
 # This script runs interactive vtworker.
-
 set -e
 echo vtworker.sh $@
 read -p "Hit Enter to run the above command ..."
@@ -1378,6 +1403,21 @@ exec $VTROOT/bin/vtworker \
     write_bin_file('vtworker.sh', vtworker % locals())
 
     template = r"""#!/bin/bash
+# Resharding demo script
+
+function run_interactive()
+{
+    command=$1
+    prompt=${2:-"Run this command? (Y/n):"}
+    echo $command
+    read -p "$prompt" response
+    if echo "$response" | grep -iq "^n" ; then
+	echo Not running: $command
+    else
+	eval $command
+    fi
+}
+
 set -e
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1409,59 +1449,59 @@ This says that we want to shard the data by a hash of the page column. In other 
 We can load this VSchema into Vitess like this:
 EOF
 
-echo vtctlclient -server %(vtctld_host)s:15999 ApplyVSchema -vschema "$(cat $VTTOP/examples/local/vschema.json)" %(cell)s_keyspace
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(vtctld_host)s:15999 ApplyVSchema -vschema "$(cat $VTTOP/examples/local/vschema.json)" %(cell)s_keyspace
+run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ApplyVSchema -vschema "$(cat $VTTOP/examples/local/vschema.json)" %(cell)s_keyspace'
 
 cat << EOF
 
-Now bring up tablets on 2 other hosts for shards -80 and 80- using deployment_helper.py
-(When prompted for vtctld, please point to %(vtctld_host)s)
+Now we will generate tablets for shards -80 and 80- using deployment_helper.py
+
+REMEMBER, when prompted for number of shards, do not accept the default, enter "2".
 
 EOF
 
-read -p "Hit Enter when you have finished starting the tablets for shards -80 and 80- ..."
+run_interactive "python %(deployment_helper_dir)s/deployment_helper.py --action generate --component vttablet --add --use-config-without-prompt"
 
 cat << EOF
 
-Now, run the following command.  You should be able to see tablets for all 3 shards.
+Now, let us start the tablets for the new shards using the generated scripts.
 
 EOF
 
-echo vtctlclient -server %(vtctld_host)s:15999 ListAllTablets
-read -p "Hit Enter to run the above command ..."
+for shard in "80-" "-80"; do
+    run_interactive "%(deployment_dir)s/bin/vttablet-up-shard-${shard}.sh"
+done
 
-vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s
+cat << EOF
+
+Now, if we run the following command, we  should be able to see tablets for all 3 shards.
+
+EOF
+
+run_interactive "vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s"
 
 cat << EOF
 Once the tablets are ready, initialize replication by electing the first master for each of the new shards:
 EOF
 for shard in "80-" "-80"; do
     tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(cell)s_keyspace/$shard | head -1 | awk '{print $1}')
-    echo vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force %(cell)s_keyspace/$shard $tablet
-    read -p "Hit Enter to run the above command ..."
-    vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force %(cell)s_keyspace/$shard $tablet
+    run_interactive "vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force %(cell)s_keyspace/$shard $tablet"
 done
 
 cat << EOF
 Now there should be a total of 15 tablets, with one master for each shard:
 EOF
 
-echo vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s
+run_interactive "vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s"
+
 cat << EOF
 The new tablets start out empty, so we need to copy everything from the original shard to the two new ones.
 
 We first copy schema:
 EOF
 
-echo vtctlclient -server %(vtctld_host)s:15999 CopySchemaShard %(cell)s_keyspace/0 %(cell)s_keyspace/-80
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(vtctld_host)s:15999 CopySchemaShard %(cell)s_keyspace/0 %(cell)s_keyspace/-80
-echo vtctlclient -server %(vtctld_host)s:15999 CopySchemaShard %(cell)s_keyspace/0 %(cell)s_keyspace/80-
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(vtctld_host)s:15999 CopySchemaShard %(cell)s_keyspace/0 %(cell)s_keyspace/80-
+for shard in "80-" "-80"; do
+    run_interactive "vtctlclient -server %(vtctld_host)s:15999 CopySchemaShard %(cell)s_keyspace/0 %(cell)s_keyspace/$shard"
+done
 
 cat << EOF
 
@@ -1497,19 +1537,13 @@ read -p "Hit Enter to add 6 rows to the database ..."
 for i in `seq 2`; do $VTTOP/examples/local/client.sh; done
 
 echo See data on shard %(cell)s_keyspace/0:
-echo vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000100 "SELECT count(*) FROM messages"
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000100 "SELECT count(*) FROM messages"
+run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000100 "SELECT count(*) FROM messages"'
 
 echo See data on shard %(cell)s_keyspace/-80:
-echo vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000200 "SELECT count(*) FROM messages"
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000200 "SELECT count(*) FROM messages"
+run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000200 "SELECT count(*) FROM messages"'
 
 echo See data on shard %(cell)s_keyspace/80-:
-echo vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000300 "SELECT count(*) FROM messages"
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000300 "SELECT count(*) FROM messages"
+run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000300 "SELECT count(*) FROM messages"'
 
 cat << EOF
 
@@ -1532,17 +1566,11 @@ The MigrateServedTypes command lets you do this one tablet type at a time, and e
 The process can be rolled back at any point until the master is switched over.
 EOF
 
-echo vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(cell)s_keyspace/0 rdonly
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(cell)s_keyspace/0 rdonly
+run_interactive "vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(cell)s_keyspace/0 rdonly"
 
-echo vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(cell)s_keyspace/0 replica
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(cell)s_keyspace/0 replica
+run_interactive "vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(cell)s_keyspace/0 replica"
 
-echo vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(cell)s_keyspace/0 master
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(cell)s_keyspace/0 master
+run_interactive "vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(cell)s_keyspace/0 master"
 
 cat << EOF
 
@@ -1561,18 +1589,13 @@ for i in `seq 2`; do $VTTOP/examples/local/client.sh; done
 
 echo See data on shard %(cell)s_keyspace/0
 echo "(no updates visible since we migrated away from it):"
-echo vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000100 "SELECT count(*) FROM messages"
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000100 "SELECT count(*) FROM messages"
+run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000100 "SELECT count(*) FROM messages"'
 echo
 echo "See data on shard %(cell)s_keyspace/-80:"
-echo vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000200 "SELECT count(*) FROM messages"
-vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000200 "SELECT count(*) FROM messages"
+run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000200 "SELECT count(*) FROM messages"'
 echo
 echo "See data on shard %(cell)s_keyspace/80-:"
-echo vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000300 "SELECT count(*) FROM messages"
-read -p "Hit Enter to run the above command ..."
-vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000300 "SELECT count(*) FROM messages"
+run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba %(cell)s-0000000300 "SELECT count(*) FROM messages"'
 
 cat << EOF
 
@@ -1581,9 +1604,8 @@ Fist we shut down the vttablets for the unused shard (shard "0").
 
 EOF
 
-echo $DIR/vttablet-down.sh
-read -p "Hit Enter to run the above command ..."
-$DIR/vttablet-down.sh
+orig_shard=0
+run_interactive "$DIR/vttablet-down-shard-${orig_shard}.sh"
 
 cat << EOF
 
@@ -1591,9 +1613,7 @@ Then we can delete the now-empty shard:
 
 EOF
 
-echo vtctlclient -server %(vtctld_host)s:15999 DeleteShard -recursive %(cell)s_keyspace/0
-vtctlclient -server %(vtctld_host)s:15999 DeleteShard -recursive %(cell)s_keyspace/0
-read -p "Hit Enter to run the above command ..."
+run_interactive "vtctlclient -server %(vtctld_host)s:15999 DeleteShard -recursive %(cell)s_keyspace/$orig_shard"
 
 echo
 echo Congratulations, you have succesfully resharded your database.
