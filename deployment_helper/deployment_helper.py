@@ -281,6 +281,9 @@ you can specify a file (one host per line) as "file:/path/to/file"."""
                     print '\t%s' % fname
 
     def start(self):
+        if getattr(self, 'up_filename') is None:
+            print 'Could not find attribute "up_filename" for %s' % self
+            return
         start_command = os.path.join(DEPLOYMENT_DIR, 'bin', self.up_filename)
         if args.interactive:
             response = read_value('Run "%s" to start %s now? :' % (start_command, self.short_name), 'Y')
@@ -355,6 +358,8 @@ class LockServer(HostClass):
         self.ls.set_topology()
         self.topology_flags = self.ls.topology_flags
         self.num_instances = self.ls.num_instances
+        self.up_filename = self.ls.up_filename
+        self.down_filename = self.ls.down_filename
 
     def generate(self):
         self.ls.generate()
@@ -589,9 +594,15 @@ The vtctld server also accepts commands from the vtctlclient tool, which is used
         grpc_port = self.ports['grpc_port']
         web_port = self.ports['web_port']
         hostname = self.hostname
+        vtdataroot = VTDATAROOT
+        vtroot = VTROOT
         return r"""
 #!/bin/bash
 set -e
+
+export VTROOT=%(vtroot)s
+export VTDATAROOT=%(vtdataroot)s
+
 HOSTNAME="%(hostname)s"
 TOPOLOGY_FLAGS="%(topology_flags)s"
 CELL="%(cell)s"
@@ -655,11 +666,18 @@ class VtGate(HostClass):
         web_port = self.ports['web_port']
         mysql_server_port = self.ports['mysql_server_port']
         hostname = self.hostname
+        vtroot = VTROOT
+        vtdataroot = VTDATAROOT
+
         return """
 #!/bin/bash
 set -e
 
 # This is an example script that starts a single vtgate.
+
+export VTROOT=%(vtroot)s
+export VTDATAROOT=%(vtdataroot)s
+
 HOSTNAME="%(hostname)s"
 TOPOLOGY_FLAGS="%(topology_flags)s"
 CELL="%(cell)s"
@@ -1191,7 +1209,7 @@ FLUSH PRIVILEGES;
         # write init_db.sql
         # set INIT_DB_SQL_FILE
 
-ACTION_CHOICES = ['configure', 'generate', 'start', 'stop', 'report', 'run_demo']
+ACTION_CHOICES = [ 'generate', 'start', 'stop', 'run_demo']
 COMPONENT_CHOICES = ['lockserver', 'vtctld', 'vttablet', 'vtgate', 'all']
 
 def define_args():
