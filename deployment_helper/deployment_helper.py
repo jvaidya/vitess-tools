@@ -508,7 +508,7 @@ CELL="%(cell)s"
         out.append('')
         out.append('# Initialize cell.')
         cmd = [os.path.join(VTROOT, 'bin/vtctl'),
-               self.topology_flags,
+               '${TOPOLOGY_FLAGS}',
                'AddCellInfo',
                '-root /vitess/${CELL}',
                '-server_address', '${ZK_SERVER}',
