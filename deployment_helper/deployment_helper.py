@@ -1732,6 +1732,11 @@ def str2bool(v):
 def main():
     global args
     parser = define_args()
+    
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
+
     args = parser.parse_args()
     actions = args.action
     components = args.component
