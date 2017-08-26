@@ -60,7 +60,7 @@ $VTROOT/bin/vttablet \
     -service_map 'grpc-queryservice,grpc-tabletmanager,grpc-updatestream' \
     -pid_file $VTDATAROOT/$TABLET_DIR/vttablet.pid \
     -vtctld_addr http://${VTCTLD_HOST}:${VTCTLD_WEB_PORT}/ \
-    $DBCONFIG_FLAGS -v 3 \
+    $DBCONFIG_FLAGS \
     > $VTDATAROOT/$TABLET_DIR/vttablet.out 2>&1 &
 
 echo "Access tablet $ALIAS at http://$HOSTNAME:$WEB_PORT/debug/status"
