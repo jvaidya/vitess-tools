@@ -750,6 +750,27 @@ def distribute_tablets(shards, configured_hosts):
 
     return tablets_per_host, host_per_tablet
 
+class MySqld(HostClass):
+    up_filename = 'mysqld-up.sh'
+    down_filename = 'mysqld-down.sh'
+    up_instance_template = 'mysqld-up-instance.sh'
+    down_instance_template = 'mysqld-down-instance.sh'
+    short_name = 'mysqld'
+    def __init__(self, vttablet):
+        self.vttablet = vttablet
+
+    def read_config_interactive(self):
+        pass
+
+    def instance_header_up(self, tablet):
+        return self.vttablet.instance_header(tablet)
+
+    def instance_header_down(self, tablet):
+        return self.vttablet.instance_header(tablet)
+
+    def instance_filename(self, tablet, ftype="up"):
+        return 'mysqld-%s-instance-%s.sh' % (ftype, tablet['unique_id'])
+    
 class VtTablet(HostClass):
     up_filename = 'vttablet-up.sh'
     down_filename = 'vttablet-down.sh'
@@ -764,6 +785,7 @@ class VtTablet(HostClass):
     tablet_types = ['master', 'replica', 'rdonly']
 
     def __init__(self, hostname, ls, vtctld):
+        self.manage_mysqld = True
         self.hostname = hostname
         self.ls = ls
         self.vtctld = vtctld
@@ -773,8 +795,14 @@ class VtTablet(HostClass):
         if args.add:
             self.read_config_add()
         self.dbconfig = DbConnectionTypes()
+        self.mysqld = MySqld(self)
 
     def read_config_interactive(self):
+        print
+        print 'A Vitess Tablet is comprised of a vttablet process and a mysqld process.'
+        manage_mysqld = read_value('Do you want mysqld managed with vttablets?', 'Y')
+        self.manage_mysqld = manage_mysqld.startswith('Y') or manage_mysqld.startswith('y')
+        print
         print
         print 'Now we will gather information about vttablets for shards'
         print
@@ -948,12 +976,28 @@ TABLET_TYPE=%(ttype)s
         out = []
         out.append('#!/bin/bash')
         out.append('')
-        out.append('echo Stopping tablets for shard "%s" ...' % shard)
+        out.append('echo Stopping vttablets for shard "%s" ...' % shard)
 
         for tablet in self.tablets:
             if shard != tablet['shard']:
                 continue
             script = self.write_instance_script(tablet, tablet['host'], "down")
+            out.append('')
+            out.append('%s %s %s' % (script_file, tablet['host'], script))
+        out.append('')
+        return '\n'.join(out)
+
+    def down_commands_shard_mysqld(self, shard):
+        script_file = make_run_script_file()
+        out = []
+        out.append('#!/bin/bash')
+        out.append('')
+        out.append('echo Stopping mysqld for shard "%s" ...' % shard)
+
+        for tablet in self.tablets:
+            if shard != tablet['shard']:
+                continue
+            script = self.mysqld.write_instance_script(tablet, tablet['host'], "down")
             out.append('')
             out.append('%s %s %s' % (script_file, tablet['host'], script))
         out.append('')
@@ -975,30 +1019,65 @@ TABLET_TYPE=%(ttype)s
         out.append('')
         return '\n'.join(out)
 
+    def up_commands_shard_mysqld(self, shard):
+        script_file = make_run_script_file()
+        out = []
+        out.append('#!/bin/bash')
+        out.append('')
+        out.append('echo Starting mysqld for shard "%s" ...' % shard)
+        init_db_sql = os.path.join(DEPLOYMENT_DIR, 'config', self.dbconfig.init_file)
+        for tablet in self.tablets:
+            if shard != tablet['shard']:
+                continue
+            script = self.mysqld.write_instance_script(tablet, tablet['host'], "up")
+            out.append('')
+            out.append('%s %s %s %s' % (script_file, tablet['host'], script, init_db_sql))
+        out.append('')
+        return '\n'.join(out)
+    
     def up_commands(self):
         out = []
         out.append('#!/bin/bash')
         out.append('')
-        out.append('echo Starting tablets for all shards')
+        if self.manage_mysqld:
+            out.append('echo Starting mysqld for all shards')
+            out.append('')        
+            for shard in self.shards:
+                shard_out = self.up_commands_shard_mysqld(shard)
+                script = write_bin_file('mysqld-up-shard-%s.sh' % shard, shard_out)
+                out.append(script)
+                out.append('')
+        
+        out.append('echo Starting vttablets for all shards')
+        out.append('')        
         for shard in self.shards:
             shard_out = self.up_commands_shard(shard)
             script = write_bin_file('vttablet-up-shard-%s.sh' % shard, shard_out)
             out.append(script)
             out.append('')
+            
         return '\n'.join(out)
 
     def down_commands(self):
         out = []
         out.append('#!/bin/bash')
         out.append('')
-        out.append('echo Stopping tablets for all shards')
+        out.append('echo Stopping vttablets for all shards')
+        out.append('')        
         for shard in self.shards:
             shard_out = self.down_commands_shard(shard)
             script = write_bin_file('vttablet-down-shard-%s.sh' % shard, shard_out)
             out.append(script)
             out.append('')
+        if self.manage_mysqld:
+            out.append('echo Stopping mysqld for all shards')
+            out.append('')            
+            for shard in self.shards:
+                shard_out = self.down_commands_shard_mysqld(shard)
+                script = write_bin_file('mysqld-down-shard-%s.sh' % shard, shard_out)
+                out.append(script)
+                out.append('')
         return '\n'.join(out)
-
 
 def get_public_hostname():
     fqdn = socket.getfqdn()
@@ -1539,11 +1618,12 @@ echo New shard set = $new_shards
 
 cat << EOF
 
-Now, let us start the tablets for the new shards using the generated scripts.
+Now, let us start mysqld (if needed) and vttablets for the new shards using the generated scripts.
 
 EOF
 
 for shard in $new_shards; do
+    run_interactive "%(deployment_dir)s/bin/mysqld-up-shard-${shard}.sh"
     run_interactive "%(deployment_dir)s/bin/vttablet-up-shard-${shard}.sh"
 done
 
@@ -1702,6 +1782,7 @@ EOF
 
 for shard in $orig_shards; do
     run_interactive "$DIR/vttablet-down-shard-${shard}.sh"
+    run_interactive "$DIR/mysql-down-shard-${shard}.sh"
 done
 
 cat << EOF
