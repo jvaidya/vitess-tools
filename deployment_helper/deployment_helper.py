@@ -770,7 +770,7 @@ class MySqld(HostClass):
 
     def instance_filename(self, tablet, ftype="up"):
         return 'mysqld-%s-instance-%s.sh' % (ftype, tablet['unique_id'])
-    
+
 class VtTablet(HostClass):
     up_filename = 'vttablet-up.sh'
     down_filename = 'vttablet-down.sh'
@@ -1034,28 +1034,28 @@ TABLET_TYPE=%(ttype)s
             out.append('%s %s %s %s' % (script_file, tablet['host'], script, init_db_sql))
         out.append('')
         return '\n'.join(out)
-    
+
     def up_commands(self):
         out = []
         out.append('#!/bin/bash')
         out.append('')
         if self.manage_mysqld:
             out.append('echo Starting mysqld for all shards')
-            out.append('')        
+            out.append('')
             for shard in self.shards:
                 shard_out = self.up_commands_shard_mysqld(shard)
                 script = write_bin_file('mysqld-up-shard-%s.sh' % shard, shard_out)
                 out.append(script)
                 out.append('')
-        
+
         out.append('echo Starting vttablets for all shards')
-        out.append('')        
+        out.append('')
         for shard in self.shards:
             shard_out = self.up_commands_shard(shard)
             script = write_bin_file('vttablet-up-shard-%s.sh' % shard, shard_out)
             out.append(script)
             out.append('')
-            
+
         return '\n'.join(out)
 
     def down_commands(self):
@@ -1063,7 +1063,7 @@ TABLET_TYPE=%(ttype)s
         out.append('#!/bin/bash')
         out.append('')
         out.append('echo Stopping vttablets for all shards')
-        out.append('')        
+        out.append('')
         for shard in self.shards:
             shard_out = self.down_commands_shard(shard)
             script = write_bin_file('vttablet-down-shard-%s.sh' % shard, shard_out)
@@ -1071,7 +1071,7 @@ TABLET_TYPE=%(ttype)s
             out.append('')
         if self.manage_mysqld:
             out.append('echo Stopping mysqld for all shards')
-            out.append('')            
+            out.append('')
             for shard in self.shards:
                 shard_out = self.down_commands_shard_mysqld(shard)
                 script = write_bin_file('mysqld-down-shard-%s.sh' % shard, shard_out)
@@ -1326,6 +1326,7 @@ def define_args():
 
 def create_start_cluster(vtctld_host, vtgate_host, tablets):
     cell = CELL
+    deployment_dir = DEPLOYMENT_DIR
     tlines = []
     for t in tablets:
         alias = t['alias']
@@ -1390,7 +1391,7 @@ echo Vitess will automatically connect the other slaves' mysqld instances so tha
 echo This is also when the default database is created. Since our keyspace is named %(cell)s_keyspace, the MySQL database will be named vt_%(cell)s_keyspace.
 echo
 
-orig_shards=$(python -c "import json; print ' '.join(json.loads(open('/home/ubuntu/vitess-deployment/config/vttablet.json').read())['shard_sets'][0])")
+orig_shards=$(python -c "import json; print ' '.join(json.loads(open('%(deployment_dir)s/config/vttablet.json').read())['shard_sets'][0])")
 first_orig_shard=$(echo $orig_shards | cut  -d " " -f1)
 num_orig_shards=$(echo $orig_shards | wc -w)
 
@@ -1600,7 +1601,7 @@ Getting original shard set.
 EOF
 
 
-orig_shards=$(python -c "import json; print ' '.join(json.loads(open('/home/ubuntu/vitess-deployment/config/vttablet.json').read())['shard_sets'][0])")
+orig_shards=$(python -c "import json; print ' '.join(json.loads(open('%(deployment_dir)s/config/vttablet.json').read())['shard_sets'][0])")
 first_orig_shard=$(echo $orig_shards | cut  -d " " -f1)
 
 echo Original shard set = $orig_shards
@@ -1612,7 +1613,7 @@ Read new shard set.
 
 EOF
 
-new_shards=$(python -c "import json; print ' '.join(json.loads(open('/home/ubuntu/vitess-deployment/config/vttablet.json').read())['shard_sets'][1])")
+new_shards=$(python -c "import json; print ' '.join(json.loads(open('%(deployment_dir)s/config/vttablet.json').read())['shard_sets'][1])")
 
 echo New shard set = $new_shards
 
@@ -1813,7 +1814,7 @@ def str2bool(v):
 def main():
     global args
     parser = define_args()
-    
+
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(1)

@@ -1,8 +1,8 @@
 
 # Variables used below would be assigned values above this line
 
-export LD_LIBRARY_PATH=/home/ubuntu/dist/grpc/usr/local/lib
-export PATH=/home/ubuntu/bin:/home/ubuntu/.local/bin:/home/ubuntu/dist/chromedriver:/home/ubuntu/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/usr/local/go/bin:/usr/local/mysql/bin
+export LD_LIBRARY_PATH=${VTROOT}/dist/grpc/usr/local/lib
+export PATH=${VTROOT}/bin:${VTROOT}/.local/bin:${VTROOT}/dist/chromedriver:${VTROOT}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/usr/local/go/bin:/usr/local/mysql/bin
 
 case "$MYSQL_FLAVOR" in
   "MySQL56")
@@ -37,5 +37,3 @@ $VTROOT/bin/mysqlctl \
     $action &
 
 wait
-
-
