@@ -756,8 +756,10 @@ class MySqld(HostClass):
     up_instance_template = 'mysqld-up-instance.sh'
     down_instance_template = 'mysqld-down-instance.sh'
     short_name = 'mysqld'
+
     def __init__(self, vttablet):
         self.vttablet = vttablet
+        self.dbconfig = DbConnectionTypes()
 
     def read_config_interactive(self):
         pass
@@ -770,7 +772,71 @@ class MySqld(HostClass):
 
     def instance_filename(self, tablet, ftype="up"):
         return 'mysqld-%s-instance-%s.sh' % (ftype, tablet['unique_id'])
-    
+
+    def down_commands_shard(self, shard):
+        script_file = make_run_script_file()
+        out = []
+        out.append('#!/bin/bash')
+        out.append('')
+        out.append('echo Stopping mysqld for shard "%s" ...' % shard)
+
+        for tablet in self.tablets:
+            if shard != tablet['shard']:
+                continue
+            script = self.write_instance_script(tablet, tablet['host'], "down")
+            out.append('')
+            out.append('%s %s %s' % (script_file, tablet['host'], script))
+        out.append('')
+        return '\n'.join(out)
+
+    def up_commands_shard(self, shard):
+        script_file = make_run_script_file()
+        out = []
+        out.append('#!/bin/bash')
+        out.append('')
+        out.append('echo Starting mysqld for shard "%s" ...' % shard)
+        init_db_sql = os.path.join(DEPLOYMENT_DIR, 'config', self.dbconfig.init_file)
+        for tablet in self.tablets:
+            if shard != tablet['shard']:
+                continue
+            script = self.write_instance_script(tablet, tablet['host'], "up")
+            out.append('')
+            out.append('%s %s %s %s' % (script_file, tablet['host'], script, init_db_sql))
+        out.append('')
+        return '\n'.join(out)
+
+    def up_commands(self):
+        out = []
+        out.append('#!/bin/bash')
+        out.append('')
+
+        out.append('echo Starting mysqld for all shards')
+        out.append('')
+        for shard in self.shards:
+            shard_out = self.up_commands_shard_mysqld(shard)
+            script = write_bin_file('mysqld-up-shard-%s.sh' % shard, shard_out)
+            out.append(script)
+            out.append('')
+
+        return '\n'.join(out)
+
+    def down_commands(self):
+        out = []
+        out.append('#!/bin/bash')
+        out.append('')
+        out.append('echo Stopping mysqld for all shards')
+        out.append('')
+        for shard in self.shards:
+            shard_out = self.down_commands_shard_mysqld(shard)
+            script = write_bin_file('mysqld-down-shard-%s.sh' % shard, shard_out)
+            out.append(script)
+            out.append('')
+        return '\n'.join(out)
+
+    def generate(self):
+        super(MySqld, self).generate()
+        self.dbconfig.generate()
+
 class VtTablet(HostClass):
     up_filename = 'vttablet-up.sh'
     down_filename = 'vttablet-down.sh'
@@ -894,7 +960,8 @@ class VtTablet(HostClass):
 
     def generate(self):
         super(VtTablet, self).generate()
-        self.dbconfig.generate()
+        if self.manage_mysqld:
+            self.mysqld.generate()
 
     def make_header(self):
         topology_flags = self.ls.topology_flags
@@ -987,75 +1054,38 @@ TABLET_TYPE=%(ttype)s
         out.append('')
         return '\n'.join(out)
 
-    def down_commands_shard_mysqld(self, shard):
-        script_file = make_run_script_file()
-        out = []
-        out.append('#!/bin/bash')
-        out.append('')
-        out.append('echo Stopping mysqld for shard "%s" ...' % shard)
-
-        for tablet in self.tablets:
-            if shard != tablet['shard']:
-                continue
-            script = self.mysqld.write_instance_script(tablet, tablet['host'], "down")
-            out.append('')
-            out.append('%s %s %s' % (script_file, tablet['host'], script))
-        out.append('')
-        return '\n'.join(out)
-
     def up_commands_shard(self, shard):
         script_file = make_run_script_file()
         out = []
         out.append('#!/bin/bash')
         out.append('')
         out.append('echo Starting tablets for shard "%s" ...' % shard)
-        init_db_sql = os.path.join(DEPLOYMENT_DIR, 'config', self.dbconfig.init_file)
         for tablet in self.tablets:
             if shard != tablet['shard']:
                 continue
             script = self.write_instance_script(tablet, tablet['host'], "up")
             out.append('')
-            out.append('%s %s %s %s' % (script_file, tablet['host'], script, init_db_sql))
+            out.append('%s %s %s' % (script_file, tablet['host'], script))
         out.append('')
         return '\n'.join(out)
 
-    def up_commands_shard_mysqld(self, shard):
-        script_file = make_run_script_file()
-        out = []
-        out.append('#!/bin/bash')
-        out.append('')
-        out.append('echo Starting mysqld for shard "%s" ...' % shard)
-        init_db_sql = os.path.join(DEPLOYMENT_DIR, 'config', self.dbconfig.init_file)
-        for tablet in self.tablets:
-            if shard != tablet['shard']:
-                continue
-            script = self.mysqld.write_instance_script(tablet, tablet['host'], "up")
-            out.append('')
-            out.append('%s %s %s %s' % (script_file, tablet['host'], script, init_db_sql))
-        out.append('')
-        return '\n'.join(out)
-    
     def up_commands(self):
         out = []
         out.append('#!/bin/bash')
         out.append('')
         if self.manage_mysqld:
-            out.append('echo Starting mysqld for all shards')
-            out.append('')        
-            for shard in self.shards:
-                shard_out = self.up_commands_shard_mysqld(shard)
-                script = write_bin_file('mysqld-up-shard-%s.sh' % shard, shard_out)
-                out.append(script)
-                out.append('')
-        
+            mysqld_up_script = os.path.join(DEPLOYMENT_DIR, 'bin', self.mysqld.up_filename)
+            out.append('# Start mysqld for all shards')
+            out.append(mysqld_up_script)
+
         out.append('echo Starting vttablets for all shards')
-        out.append('')        
+        out.append('')
         for shard in self.shards:
             shard_out = self.up_commands_shard(shard)
             script = write_bin_file('vttablet-up-shard-%s.sh' % shard, shard_out)
             out.append(script)
             out.append('')
-            
+
         return '\n'.join(out)
 
     def down_commands(self):
@@ -1063,20 +1093,18 @@ TABLET_TYPE=%(ttype)s
         out.append('#!/bin/bash')
         out.append('')
         out.append('echo Stopping vttablets for all shards')
-        out.append('')        
+        out.append('')
         for shard in self.shards:
             shard_out = self.down_commands_shard(shard)
             script = write_bin_file('vttablet-down-shard-%s.sh' % shard, shard_out)
             out.append(script)
             out.append('')
         if self.manage_mysqld:
-            out.append('echo Stopping mysqld for all shards')
-            out.append('')            
-            for shard in self.shards:
-                shard_out = self.down_commands_shard_mysqld(shard)
-                script = write_bin_file('mysqld-down-shard-%s.sh' % shard, shard_out)
-                out.append(script)
-                out.append('')
+            mysqld_down_script = os.path.join(DEPLOYMENT_DIR, 'bin', self.mysqld.down_filename)
+            out.append('# Stop mysqld for all shards')
+            out.append(mysqld_down_script)
+            out.append('')
+
         return '\n'.join(out)
 
 def get_public_hostname():
@@ -1813,7 +1841,7 @@ def str2bool(v):
 def main():
     global args
     parser = define_args()
-    
+
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(1)
