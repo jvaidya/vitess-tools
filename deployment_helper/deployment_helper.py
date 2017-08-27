@@ -1077,7 +1077,7 @@ TABLET_TYPE=%(ttype)s
             mysqld_up_script = os.path.join(DEPLOYMENT_DIR, 'bin', self.mysqld.up_filename)
             out.append('# Start mysqld for all shards')
             out.append(mysqld_up_script)
-
+            out.append('')
         out.append('echo Starting vttablets for all shards')
         out.append('')
         for shard in self.shards:
@@ -1354,6 +1354,7 @@ def define_args():
 
 def create_start_cluster(vtctld_host, vtgate_host, tablets):
     cell = CELL
+    deployment_dir = DEPLOYMENT_DIR
     tlines = []
     for t in tablets:
         alias = t['alias']
@@ -1418,7 +1419,7 @@ echo Vitess will automatically connect the other slaves' mysqld instances so tha
 echo This is also when the default database is created. Since our keyspace is named %(cell)s_keyspace, the MySQL database will be named vt_%(cell)s_keyspace.
 echo
 
-orig_shards=$(python -c "import json; print ' '.join(json.loads(open('/home/ubuntu/vitess-deployment/config/vttablet.json').read())['shard_sets'][0])")
+orig_shards=$(python -c "import json; print ' '.join(json.loads(open('%(deployment_dir)s/config/vttablet.json').read())['shard_sets'][0])")
 first_orig_shard=$(echo $orig_shards | cut  -d " " -f1)
 num_orig_shards=$(echo $orig_shards | wc -w)
 
@@ -1628,7 +1629,7 @@ Getting original shard set.
 EOF
 
 
-orig_shards=$(python -c "import json; print ' '.join(json.loads(open('/home/ubuntu/vitess-deployment/config/vttablet.json').read())['shard_sets'][0])")
+orig_shards=$(python -c "import json; print ' '.join(json.loads(open('%(deployment_dir)s/config/vttablet.json').read())['shard_sets'][0])")
 first_orig_shard=$(echo $orig_shards | cut  -d " " -f1)
 
 echo Original shard set = $orig_shards
@@ -1640,7 +1641,7 @@ Read new shard set.
 
 EOF
 
-new_shards=$(python -c "import json; print ' '.join(json.loads(open('/home/ubuntu/vitess-deployment/config/vttablet.json').read())['shard_sets'][1])")
+new_shards=$(python -c "import json; print ' '.join(json.loads(open('%(deployment_dir)s/config/vttablet.json').read())['shard_sets'][1])")
 
 echo New shard set = $new_shards
 
