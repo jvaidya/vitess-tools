@@ -759,6 +759,8 @@ class MySqld(HostClass):
 
     def __init__(self, vttablet):
         self.vttablet = vttablet
+        self.shards = self.vttablet.shards
+        self.tablets = self.vttablet.tablets
         self.dbconfig = DbConnectionTypes()
 
     def read_config_interactive(self):
@@ -813,7 +815,7 @@ class MySqld(HostClass):
         out.append('echo Starting mysqld for all shards')
         out.append('')
         for shard in self.shards:
-            shard_out = self.up_commands_shard_mysqld(shard)
+            shard_out = self.up_commands_shard(shard)
             script = write_bin_file('mysqld-up-shard-%s.sh' % shard, shard_out)
             out.append(script)
             out.append('')
@@ -827,7 +829,7 @@ class MySqld(HostClass):
         out.append('echo Stopping mysqld for all shards')
         out.append('')
         for shard in self.shards:
-            shard_out = self.down_commands_shard_mysqld(shard)
+            shard_out = self.down_commands_shard(shard)
             script = write_bin_file('mysqld-down-shard-%s.sh' % shard, shard_out)
             out.append(script)
             out.append('')
@@ -860,8 +862,8 @@ class VtTablet(HostClass):
         self.read_config()
         if args.add:
             self.read_config_add()
-        self.dbconfig = DbConnectionTypes()
         self.mysqld = MySqld(self)
+        self.dbconfig = self.mysqld.dbconfig
 
     def read_config_interactive(self):
         print
@@ -1811,7 +1813,7 @@ EOF
 
 for shard in $orig_shards; do
     run_interactive "$DIR/vttablet-down-shard-${shard}.sh"
-    run_interactive "$DIR/mysql-down-shard-${shard}.sh"
+    run_interactive "$DIR/mysqld-down-shard-${shard}.sh"
 done
 
 cat << EOF
