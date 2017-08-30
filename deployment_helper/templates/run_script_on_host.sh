@@ -29,7 +29,14 @@ function is_local()
 	return
     fi
     host=$(curl -s $AWS_PUBLIC_HOSTNAME_URL)
-    if [ $cmd_host == $host ]; then
+    # Catch curl failure
+    rc=$?
+    if [ $rc != 0 ]; then
+	echo 1
+	return
+    fi
+    # Catch potential empty response
+    if [ $cmd_host == "$host" ]; then
 	echo 1
 	return
     fi
