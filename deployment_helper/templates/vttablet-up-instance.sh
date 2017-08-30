@@ -30,6 +30,7 @@ $VTROOT/bin/vttablet \
     -init_keyspace $KEYSPACE \
     -init_shard $SHARD \
     -init_tablet_type $TABLET_TYPE \
+    -init_db_name_override $DBNAME \
     -mycnf_mysql_port $MYSQL_PORT \
     -health_check_interval 5s \
     -enable_semi_sync \

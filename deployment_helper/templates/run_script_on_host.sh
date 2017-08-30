@@ -14,22 +14,22 @@ function is_local()
 {
     cmd_host=$1
     host=$(hostname -f)
-    if [ $cmd_host == $host ]; then
+    if [ "$cmd_host" == "$host" ]; then
 	echo 1
 	return
     fi
     host=$(hostname)
-    if [ $cmd_host == $host ]; then
+    if [ "$cmd_host" == "$host" ]; then
 	echo 1
 	return
     fi
     host=$(hostname -i)
-    if [ $cmd_host == $host ]; then
+    if [ "$cmd_host" == "$host" ]; then
 	echo 1
 	return
     fi
-    host=$(curl -s $AWS_PUBLIC_HOSTNAME_URL)
-    if [ $cmd_host == $host ]; then
+    host=$(curl -s -m 1 $AWS_PUBLIC_HOSTNAME_URL)
+    if [ "$cmd_host" == "$host" ]; then
 	echo 1
 	return
     fi

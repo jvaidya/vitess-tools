@@ -15,8 +15,10 @@ VTROOT = None
 VTDATAROOT = None
 VTTOP = None
 MYSQL_FLAVOR = None
+VT_MYSQL_ROOT = None
 DEPLOYMENT_DIR = None
 CELL = None
+KEYSPACE = None
 DEPLOYMENT_HELPER_DIR = os.path.abspath(os.path.dirname(__file__))
 
 """
@@ -42,15 +44,17 @@ def read_template(filename):
         return ''.join(fh.readlines())
 
 def check_host():
-    global VTROOT, VTTOP, VTDATAROOT, MYSQL_FLAVOR, DEPLOYMENT_DIR
+    global VTROOT, VTTOP, VTDATAROOT, MYSQL_FLAVOR, VT_MYSQL_ROOT, DEPLOYMENT_DIR
     VTROOT = os.environ.get('VTROOT')
     VTTOP = os.environ.get('VTTOP')
     VTDATAROOT = os.environ.get('VTDATAROOT')
     MYSQL_FLAVOR = os.environ.get('MYSQL_FLAVOR')
-    if VTROOT is not None and VTDATAROOT is not None and MYSQL_FLAVOR is not None:
+    VT_MYSQL_ROOT = os.environ.get('VT_MYSQL_ROOT')
+    if VTROOT is not None and VTDATAROOT is not None and MYSQL_FLAVOR is not None and VT_MYSQL_ROOT is not None:
         print 'VTROOT=%s' % VTROOT
         print 'VTDATAROOT=%s' % VTDATAROOT
         print 'MYSQL_FLAVOR=%s' % MYSQL_FLAVOR
+        print 'VT_MYSQL_ROOT=%s' % VT_MYSQL_ROOT
     else:
         print """
 We assume that you are running this on a host on which all the required vitess binaries exist
@@ -62,6 +66,9 @@ on a partition where there is enough disk space for your data.
 
 MYSQL_FLAVOR should be one of MariaDB or MySQL56.
 
+Set the VT_MYSQL_ROOT variable to the root directory of your mysql flavor installation.
+This means that the mysql executable should be found at $VT_MYSQL_ROOT/bin/mysql.
+
 """
         if VTROOT is None:
             VTROOT = os.environ.get('VTROOT') or read_value('Did not find VTROOT in environment. Enter VTROOT:')
@@ -71,10 +78,14 @@ MYSQL_FLAVOR should be one of MariaDB or MySQL56.
 
         if MYSQL_FLAVOR is None:
             MYSQL_FLAVOR = os.environ.get('MYSQL_FLAVOR') or read_value('Did not find MYSQL_FLAVOR in environment. Enter MYSQL_FLAVOR:')
+        if VT_MYSQL_ROOT is None:
+            VT_MYSQL_ROOT = os.environ.get('VT_MYSQL_ROOT') or read_value('Did not find VT_MYSQL_ROOT in environment. Enter VT_MYSQL_ROOT:')
 
         print 'VTROOT=%s' % VTROOT
         print 'VTDATAROOT=%s' % VTDATAROOT
         print 'MYSQL_FLAVOR=%s' % MYSQL_FLAVOR
+        print 'VT_MYSQL_ROOT=%s' % VT_MYSQL_ROOT
+
     DEPLOYMENT_DIR = os.path.join(VTROOT, 'vitess-deployment')
     print 'DEPLOYMENT_DIR=%s' % DEPLOYMENT_DIR
     print
@@ -103,9 +114,11 @@ def read_value(prompt, default=''):
         val = default
     return val
 
-def set_cell(default):
-    global CELL
-    CELL = os.environ.get('CELL') or read_value('Enter CELL name:', default)
+def set_cell_and_keyspace(default_cell):
+    global CELL, KEYSPACE
+    CELL = os.environ.get('CELL') or read_value('Enter CELL name:', default_cell)
+    default_keyspace = '%s_keyspace' % CELL
+    KEYSPACE = read_value('Enter KEYSPACE name:', default_keyspace)
 
 base_ports = {
     'zk2': dict(leader_port=28881, election_port=38881, client_port=21811),
@@ -327,7 +340,7 @@ class LockServer(HostClass):
         if args.vtctld_addr is not None:
             self.init_from_vtctld(args.vtctld_addr)
         else:
-            set_cell('cell1')
+            set_cell_and_keyspace('cell1')
             self.read_config()
 
     def init_from_vtctld(self, vtctld_endpoint):
@@ -335,7 +348,7 @@ class LockServer(HostClass):
         cmd = ['vtctlclient', '-server', vtctld_endpoint, 'GetCellInfoNames']
         cells = [ c for c in subprocess.check_output(cmd).split('\n') if c]
         print 'Found cells: %s' % cells
-        set_cell(cells[0])
+        set_cell_and_keyspace(cells[0])
         cmd = ['vtctlclient', '-server', vtctld_endpoint, 'GetCellInfo', CELL]
         cell_info = json.loads(subprocess.check_output(cmd))
         self.set_topology_from_vtctld(cell_info)
@@ -972,11 +985,13 @@ class VtTablet(HostClass):
         vtroot = VTROOT
         vttop = VTTOP
         cell = CELL
+        mysql_flavor = MYSQL_FLAVOR
         return """#!/bin/bash
 # This script creates a single shard vttablet deployment.
 VTDATAROOT=%(vtdataroot)s
-VTROOT = %(vtroot)s
+VTROOT=%(vtroot)s
 VTTOP=%(vttop)s
+MYSQL_FLAVOR=%(mysql_flavor)s
 
 set -e
 
@@ -999,18 +1014,22 @@ TOPOLOGY_FLAGS="%(topology_flags)s"
         init_file = os.path.join(DEPLOYMENT_DIR, 'config', self.dbconfig.init_file)
         vtctld_host = self.vtctld.hostname
         vtctld_web_port = self.vtctld.ports['web_port']
-        keyspace = '%s_keyspace' % cell
-        vt_mysql_root = os.environ.get('VT_MYSQL_ROOT')
+        keyspace = KEYSPACE
+        vt_mysql_root = VT_MYSQL_ROOT
+        dbname = self.dbconfig.get_dbname()
         all_vars = locals()
         all_vars.update(tablet)
         if all_vars['ttype'] == 'master':
             all_vars['ttype'] = 'replica'
         return """#!/bin/bash
+
 export VTDATAROOT=%(vtdataroot)s
 export VTROOT=%(vtroot)s
 export VTTOP=%(vttop)s
 export VT_MYSQL_ROOT=%(vt_mysql_root)s
 export MYSQL_FLAVOR=%(mysql_flavor)s
+
+DBNAME=%(dbname)s
 KEYSPACE=%(keyspace)s
 TOPOLOGY_FLAGS="%(topology_flags)s"
 DBCONFIG_DBA_FLAGS=%(dbconfig_dba_flags)s
@@ -1147,7 +1166,7 @@ DB_USERS = {
 
 GLOBAL_PARAMS = {
     'charset': 'utf8',
-    'dbname': 'vt_%(cell)s_keyspace',
+    'dbname': 'vt_%(keyspace)s',
 
 }
 
@@ -1189,6 +1208,7 @@ class DbConnectionTypes(ConfigType):
         print 'Now we will ask you for parameters used for creating mysql connections that are shared by all connection types'
         self.dbconfig['global'] = {}
         cell = CELL
+        keyspace = KEYSPACE
         for param, default in GLOBAL_PARAMS.iteritems():
             if '%' in param:
                 param = param % locals()
@@ -1200,6 +1220,9 @@ class DbConnectionTypes(ConfigType):
         out = self.make_init_db_sql()
         write_dep_file('config', self.init_file, out)
 
+    def get_dbname(self):
+        return self.dbconfig['global']['dbname']
+
     def get_dba_flags(self):
         charset = self.dbconfig['global']['charset']
         flags = []
@@ -1209,7 +1232,7 @@ class DbConnectionTypes(ConfigType):
             password = self.dbconfig[db_type]['password']
             flags.append(fmt % locals())
             for param, value in self.dbconfig['global'].iteritems():
-                if db_type == 'dba' and param == 'dbname':
+                if param == 'dbname':
                     continue
                 flags.append('-db-config-%(db_type)s-%(param)s %(value)s' % locals())
         return '"%s"' % ' '.join(flags)
@@ -1224,7 +1247,7 @@ class DbConnectionTypes(ConfigType):
             password = self.dbconfig[db_type]['password']
             flags.append(fmt % locals())
             for param, value in self.dbconfig['global'].iteritems():
-                if db_type == 'dba' and param == 'dbname':
+                if param == 'dbname':
                     continue
                 flags.append('-db-config-%(db_type)s-%(param)s %(value)s' % locals())
 
@@ -1354,8 +1377,9 @@ def define_args():
                     help='Specify vtctld-addr (useful in non-interactive mode).')
     return ap
 
-def create_start_cluster(vtctld_host, vtgate_host, tablets):
+def create_start_cluster(vtctld_host, vtgate_host, tablets, dbname):
     cell = CELL
+    keyspace = KEYSPACE
     deployment_dir = DEPLOYMENT_DIR
     tlines = []
     for t in tablets:
@@ -1418,7 +1442,7 @@ run_interactive "$DIR/vttablet-up.sh"
 echo
 echo Next, designate one of the tablets to be the initial master.
 echo Vitess will automatically connect the other slaves' mysqld instances so that they start replicating from the master's mysqld.
-echo This is also when the default database is created. Since our keyspace is named %(cell)s_keyspace, the MySQL database will be named vt_%(cell)s_keyspace.
+echo This is also when the default database is created. Our keyspace is named %(keyspace)s, and our MySQL database is named %(dbname)s.
 echo
 
 orig_shards=$(python -c "import json; print ' '.join(json.loads(open('%(deployment_dir)s/config/vttablet.json').read())['shard_sets'][0])")
@@ -1426,8 +1450,8 @@ first_orig_shard=$(echo $orig_shards | cut  -d " " -f1)
 num_orig_shards=$(echo $orig_shards | wc -w)
 
 for shard in $orig_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(cell)s_keyspace/$shard | head -1 | awk '{print $1}')
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force %(cell)s_keyspace/$shard $tablet"
+    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
+    run_interactive "vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force %(keyspace)s/$shard $tablet"
 done
 
 echo
@@ -1440,12 +1464,12 @@ run_interactive "vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell
 echo
 echo The vtctlclient tool can be used to apply the database schema across all tablets in a keyspace.
 echo The following command creates the table defined in the create_test_table.sql file
-run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ApplySchema -sql "$(cat $VTTOP/examples/local/create_test_table.sql)" %(cell)s_keyspace'
+run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ApplySchema -sql "$(cat $VTTOP/examples/local/create_test_table.sql)" %(keyspace)s'
 echo
 echo "Now that the initial schema is applied, it's a good time to take the first backup. This backup will be used to automatically restore any additional replicas that you run, before they connect themselves to the master and catch up on replication. If an existing tablet goes down and comes back up without its data, it will also automatically restore from the latest backup and then resume replication."
 
 for shard in $orig_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(cell)s_keyspace/$shard | head -3 | tail -1 | awk '{print $1}')
+    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -3 | tail -1 | awk '{print $1}')
     run_interactive "vtctlclient -server %(vtctld_host)s:15999 Backup $tablet"
 done
 
@@ -1454,7 +1478,7 @@ echo
 echo After the backup completes, you can list available backups for the shards:
 
 for shard in $orig_shards; do
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 ListBackups %(cell)s_keyspace/$shard"
+    run_interactive "vtctlclient -server %(vtctld_host)s:15999 ListBackups %(keyspace)s/$shard"
 done
 
 
@@ -1471,7 +1495,7 @@ echo
 echo We will apply the following VSchema:
 cat $VTTOP/examples/local/vschema.json
 echo
-run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ApplyVSchema -vschema "$(cat $VTTOP/examples/local/vschema.json)" %(cell)s_keyspace'
+run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ApplyVSchema -vschema "$(cat $VTTOP/examples/local/vschema.json)" %(keyspace)s'
 fi
 
 echo Start vtgate
@@ -1547,6 +1571,7 @@ def create_sharding_workflow_script(ls, vtctld):
     topology_flags = ls.topology_flags
     vtctld_host = vtctld.hostname
     cell = CELL
+    keyspace = KEYSPACE
     deployment_dir = DEPLOYMENT_DIR
     deployment_helper_dir = DEPLOYMENT_HELPER_DIR
     vtworker = """#!/bin/bash
@@ -1612,7 +1637,7 @@ This says that we want to shard the data by a hash of the page column. In other 
 We can load this VSchema into Vitess like this:
 EOF
 
-run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ApplyVSchema -vschema "$(cat $VTTOP/examples/local/vschema.json)" %(cell)s_keyspace'
+run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ApplyVSchema -vschema "$(cat $VTTOP/examples/local/vschema.json)" %(keyspace)s'
 
 cat << EOF
 
@@ -1670,8 +1695,8 @@ cat << EOF
 Once the tablets are ready, initialize replication by electing the first master for each of the new shards:
 EOF
 for shard in $new_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(cell)s_keyspace/$shard | head -1 | awk '{print $1}')
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force %(cell)s_keyspace/$shard $tablet"
+    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
+    run_interactive "vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force %(keyspace)s/$shard $tablet"
 done
 
 cat << EOF
@@ -1687,7 +1712,7 @@ We first copy schema:
 EOF
 
 for shard in $new_shards; do
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 CopySchemaShard %(cell)s_keyspace/$first_orig_shard %(cell)s_keyspace/$shard"
+    run_interactive "vtctlclient -server %(vtctld_host)s:15999 CopySchemaShard %(keyspace)s/$first_orig_shard %(keyspace)s/$shard"
 done
 
 cat << EOF
@@ -1695,7 +1720,7 @@ cat << EOF
 Next we copy the data. Since the amount of data to copy can be very large, we use a special batch process
 called vtworker to stream the data from a single source to multiple destinations, routing each row based on its keyspace_id.
 
-Notice that we only needed to specifiy the source shards: %(cell)s_keyspace/[$orig_shards]
+Notice that we only needed to specifiy the source shards: %(keyspace)s/[$orig_shards]
 The SplitClone process will automatically figure out which shards to use as the destinations based on the key range that needs to be covered.
 In this case, shard 0 covers the entire range, so it identifies -80 and 80- as the destination shards, since they combine to cover the same range.
 
@@ -1709,7 +1734,7 @@ This allows the destination shards to catch up on updates that have continued to
 EOF
 
 for shard in $orig_shards; do
-    $DIR/vtworker.sh SplitClone %(cell)s_keyspace/$shard
+    $DIR/vtworker.sh SplitClone %(keyspace)s/$shard
 done
 
 cat << EOF
@@ -1729,7 +1754,7 @@ echo See data on original shard set: $orig_shards:
 echo
 
 for shard in $orig_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(cell)s_keyspace/$shard | head -1 | awk '{print $1}')
+    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
     run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba $tablet "SELECT count(*) FROM messages"'
 done
 
@@ -1737,7 +1762,7 @@ echo See data on new shard set: $new_shards:
 echo
 
 for shard in $new_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(cell)s_keyspace/$shard | head -1 | awk '{print $1}')
+    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
     run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba $tablet "SELECT count(*) FROM messages"'
 done
 
@@ -1752,7 +1777,7 @@ EOF
 
 for shard in $new_shards; do
     echo for $shard
-    $DIR/vtworker.sh SplitDiff %(cell)s_keyspace/$shard
+    $DIR/vtworker.sh SplitDiff %(keyspace)s/$shard
 done
 
 cat << EOF
@@ -1763,11 +1788,11 @@ The process can be rolled back at any point until the master is switched over.
 EOF
 
 for shard in $orig_shards; do
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(cell)s_keyspace/$shard rdonly"
+    run_interactive "vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(keyspace)s/$shard rdonly"
 
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(cell)s_keyspace/$shard replica"
+    run_interactive "vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(keyspace)s/$shard replica"
 
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(cell)s_keyspace/$shard master"
+    run_interactive "vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(keyspace)s/$shard master"
 done
 
 
@@ -1792,7 +1817,7 @@ echo
 echo
 
 for shard in $orig_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(cell)s_keyspace/$shard | head -1 | awk '{print $1}')
+    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
     run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba $tablet "SELECT count(*) FROM messages"'
 done
 
@@ -1800,7 +1825,7 @@ echo See data on new shard set: $new_shards:
 echo
 
 for shard in $new_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(cell)s_keyspace/$shard | head -1 | awk '{print $1}')
+    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
     run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba $tablet "SELECT count(*) FROM messages"'
 done
 
@@ -1823,7 +1848,7 @@ Then we can delete the now-empty shard-set:
 EOF
 
 for shard in $orig_shards; do
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 DeleteShard -recursive %(cell)s_keyspace/$shard"
+    run_interactive "vtctlclient -server %(vtctld_host)s:15999 DeleteShard -recursive %(keyspace)s/$shard"
 done
 
 echo
@@ -1893,7 +1918,7 @@ def main():
             run_demo(c_instances['lockserver'], c_instances['vtctld'], c_instances['vtgate'], c_instances['vttablet'])
 
 def run_demo(ls, vtctld, vtgate, vttablets):
-    create_start_cluster(vtctld.hostname, vtgate.hostname, vttablets.tablets)
+    create_start_cluster(vtctld.hostname, vtgate.hostname, vttablets.tablets, vttablets.dbconfig.get_dbname())
     create_destroy_cluster()
     create_sharding_workflow_script(ls, vtctld)
     print '\t%s' % 'start_cluster.sh'
