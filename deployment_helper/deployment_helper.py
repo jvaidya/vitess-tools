@@ -225,7 +225,7 @@ class HostClass(ConfigType):
         print 'Configured hosts = %s' % self.configured_hosts
         print """Please specify additional hosts to use for this component.
 To specify hosts, you can enter hostnames seperated by commas or
-you can specify a file (one host per line) as "file:/path/to/file"."""
+you can specify a file (one host per line) as "[file:]/path/to/file"."""
         public_hostname = get_public_hostname()
         host_prompt = 'Specify hosts for "%s":' % self.short_name
         host_input = read_value(host_prompt, public_hostname)
@@ -235,6 +235,14 @@ you can specify a file (one host per line) as "file:/path/to/file"."""
                 print 'Could not find file: "%s"' % path
                 host_input = read_value(host_prompt, host_input)
                 _, path = host_input.split(':')
+            with open(path) as fh:
+                new_hosts = [l.strip() for l in fh.readlines()]
+        elif '/' in host_input:     # any / should be a good enough indication this is a file name
+            path = host_input
+            while not os.path.isfile(path):
+                print 'Could not find file: "%s"' % path
+                host_input = read_value(host_prompt, host_input)
+                path = host_input
             with open(path) as fh:
                 new_hosts = [l.strip() for l in fh.readlines()]
         else:
