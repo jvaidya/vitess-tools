@@ -117,6 +117,9 @@ def read_value(prompt, default=''):
 def set_cell_and_keyspace(default_cell):
     global CELL, KEYSPACE
     CELL = os.environ.get('CELL') or read_value('Enter CELL name:', default_cell)
+    if '-' in CELL:
+        print("Error: CELL must not contain a '-' character")
+        sys.exit(1)
     default_keyspace = '%s_keyspace' % CELL
     KEYSPACE = read_value('Enter KEYSPACE name:', default_keyspace)
 
