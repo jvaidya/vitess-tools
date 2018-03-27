@@ -118,6 +118,9 @@ def read_value(prompt, default=''):
 def set_cell_and_keyspace(default_cell):
     global CELL, KEYSPACE
     CELL = os.environ.get('CELL') or read_value('Enter CELL name:', default_cell)
+    if '-' in CELL:
+        print("Error: CELL must not contain a '-' character")
+        sys.exit(1)
     default_keyspace = '%s_keyspace' % CELL
     KEYSPACE = read_value('Enter KEYSPACE name:', default_keyspace)
 
@@ -225,7 +228,7 @@ class HostClass(ConfigType):
     def get_hosts(self):
         print 'Configured hosts = %s' % self.configured_hosts
         print """Please specify additional hosts to use for this component.
-To specify hosts, you can enter hostnames seperated by commas or
+To specify hosts, you can enter hostnames separated by commas or
 you can specify a file (one host per line) as "file:/path/to/file"."""
         public_hostname = get_public_hostname()
         host_prompt = 'Specify hosts for "%s":' % self.short_name
@@ -901,7 +904,7 @@ class VtTablet(HostClass):
         num_shards = read_value('Enter number of new shards:','1')
         new_shard_candidates = make_shards(int(num_shards))
         default_shards = ','.join(new_shard_candidates)
-        new_shards_read = read_value('Enter shard names seperated by commas "0", "-80" "80-" etc.:', default_shards)
+        new_shards_read = read_value('Enter shard names separated by commas "0", "-80" "80-" etc.:', default_shards)
         new_shards = new_shards_read.split(',')
         self.shard_sets.append(new_shards)
         all_shards = self.shards + new_shards
@@ -1193,7 +1196,7 @@ DB_USERS = {
         'permissions': DEFAULT_PERMISSIONS,
         },
     'dba': {
-        'description': 'Admin user with all privilages.',
+        'description': 'Admin user with all privileges.',
         'permissions': ['ALL'],
     },
 }
@@ -1223,8 +1226,8 @@ class DbConnectionTypes(ConfigType):
         print
         print 'Vitess uses the following connection types to connect to mysql: %s' % DB_USERS.keys()
         print 'Each connection type uses a different user and is used for a different purpose.'
-        print 'You can grant each user different privilages.'
-        print 'First we will prompt you for usernames, passwords and privilages you want to grant for each of these users.'
+        print 'You can grant each user different privileges.'
+        print 'First we will prompt you for usernames, passwords and privileges you want to grant for each of these users.'
         print
         password_set = False
         for db_type in DB_USERS:
@@ -1246,7 +1249,7 @@ class DbConnectionTypes(ConfigType):
             #password_set = password_set or bool(password)
             self.dbconfig[db_type]['user'] = user
             self.dbconfig[db_type]['password'] = password
-            perms = read_value('Enter privlages to be granted to user "%s":' % user, ', '.join(DB_USERS[db_type]['permissions']))
+            perms = read_value('Enter privileges to be granted to user "%s":' % user, ', '.join(DB_USERS[db_type]['permissions']))
             self.dbconfig[db_type]['permissions'] = perms
             print
 

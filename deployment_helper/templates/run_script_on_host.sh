@@ -23,8 +23,8 @@ function is_local()
 	echo 1
 	return
     fi
-    host=$(hostname -i)
-    if [ "$cmd_host" == "$host" ]; then
+    # OSX does not support hostname -i
+    if [ "$(uname)" != Darwin -a "$cmd_host" == "$(hostname -i)" ]; then
 	echo 1
 	return
     fi
