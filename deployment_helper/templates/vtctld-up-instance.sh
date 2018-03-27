@@ -19,6 +19,7 @@ ${VTROOT}/bin/vtctld \
   -port ${WEB_PORT} \
   -grpc_port ${GRPC_PORT} \
   -pid_file ${VTDATAROOT}/tmp/vtctld.pid \
+  ${MYSQL_AUTH_PARAM} \
   > ${VTDATAROOT}/tmp/vtctld.out 2>&1 &
 
 disown -a

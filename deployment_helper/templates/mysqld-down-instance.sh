@@ -3,7 +3,7 @@
 
 echo "Stopping MySQL for tablet $ALIAS..."
 $VTROOT/bin/mysqlctl \
-    -db-config-dba-uname vt_dba \
+    $DBCONFIG_DBA_FLAGS \
     -tablet_uid $UNIQUE_ID \
     shutdown &
 

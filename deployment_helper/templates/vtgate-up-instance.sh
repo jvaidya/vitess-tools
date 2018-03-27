@@ -16,6 +16,7 @@ $VTROOT/bin/vtgate \
   -gateway_implementation discoverygateway \
   -service_map 'grpc-vtgateservice' \
   -pid_file $VTDATAROOT/tmp/vtgate.pid \
+  ${MYSQL_AUTH_PARAM} \
   > $VTDATAROOT/tmp/vtgate.out 2>&1 &
 
 echo "Access vtgate at http://${HOSTNAME}:${WEB_PORT}/debug/status"

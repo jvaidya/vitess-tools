@@ -20,6 +20,7 @@ DEPLOYMENT_DIR = None
 CELL = None
 KEYSPACE = None
 DEPLOYMENT_HELPER_DIR = os.path.abspath(os.path.dirname(__file__))
+MYSQL_AUTH_PARAM = None
 
 """
 Add cell?
@@ -609,6 +610,7 @@ The vtctld server also accepts commands from the vtctlclient tool, which is used
         hostname = self.hostname
         vtdataroot = VTDATAROOT
         vtroot = VTROOT
+        mysql_auth_param = MYSQL_AUTH_PARAM
         return r"""
 #!/bin/bash
 set -e
@@ -621,6 +623,7 @@ TOPOLOGY_FLAGS="%(topology_flags)s"
 CELL="%(cell)s"
 GRPC_PORT=%(grpc_port)s
 WEB_PORT=%(web_port)s
+MYSQL_AUTH_PARAM="%(mysql_auth_param)s"
 """ % locals()
 
 class VtGate(HostClass):
@@ -681,6 +684,7 @@ class VtGate(HostClass):
         hostname = self.hostname
         vtroot = VTROOT
         vtdataroot = VTDATAROOT
+        mysql_auth_param = MYSQL_AUTH_PARAM
 
         return """
 #!/bin/bash
@@ -697,6 +701,7 @@ CELL="%(cell)s"
 GRPC_PORT=%(grpc_port)s
 WEB_PORT=%(web_port)s
 MYSQL_SERVER_PORT=%(mysql_server_port)s
+MYSQL_AUTH_PARAM="%(mysql_auth_param)s"
 """ % locals()
 
 
@@ -775,6 +780,8 @@ class MySqld(HostClass):
         self.shards = self.vttablet.shards
         self.tablets = self.vttablet.tablets
         self.dbconfig = DbConnectionTypes()
+        if args.rds:
+            self.up_instance_template = 'mysqld-up-instance-rds.sh'
 
     def read_config_interactive(self):
         pass
@@ -949,13 +956,20 @@ class VtTablet(HostClass):
                     prompt = '\tEnter grpc port number:'
                     default = self.base_ports['grpc'] + base_offset + cnt
                     grpc_port = read_value(prompt, default)
+                    prompt = '\tEnter mysql host:'
+                    default = host
+                    mysql_host = read_value(prompt, default)
+                    if mysql_host == host:
+                        default = self.base_ports['mysql'] + base_offset + cnt
+                    else:
+                        default = 3306
                     prompt = '\tEnter mysql port number:'
-                    default = self.base_ports['mysql'] + base_offset + cnt
                     mysql_port = read_value(prompt, default)
                     print
                     tablet = dict(host=host,
                                   grpc_port=grpc_port,
                                   web_port=web_port,
+                                  mysql_host=mysql_host,
                                   mysql_port=mysql_port,
                                   alias=alias,
                                   tablet_dir=tablet_dir,
@@ -1003,6 +1017,22 @@ TOPOLOGY_FLAGS="%(topology_flags)s"
 """ % locals()
 
     def instance_header(self, tablet):
+        # if mysql_host and host are not the same, we need
+        # to do things differently.
+        rds = 0
+        if tablet['host'] != tablet['mysql_host']:
+            extra_params = "-mycnf_server_id %s" % tablet['unique_id']
+            mysql_host = tablet['mysql_host']
+            mysql_port = tablet['mysql_port']
+            if args.rds:
+                rds = 1
+        else:
+            if args.rds:
+                extra_params = '-enable_replication_reporter'
+            else:
+                extra_params = '-enable_semi_sync -enable_replication_reporter'
+            mysql_host = ''
+            mysql_port = ''
         topology_flags = self.ls.topology_flags
         vtdataroot = VTDATAROOT
         vtroot = VTROOT
@@ -1010,13 +1040,14 @@ TOPOLOGY_FLAGS="%(topology_flags)s"
         cell = CELL
         mysql_flavor = MYSQL_FLAVOR
         dbconfig_dba_flags = self.dbconfig.get_dba_flags()
-        dbconfig_flags = self.dbconfig.get_flags()
+        dbconfig_flags = self.dbconfig.get_flags(host=mysql_host, port=mysql_port)
         init_file = os.path.join(DEPLOYMENT_DIR, 'config', self.dbconfig.init_file)
         vtctld_host = self.vtctld.hostname
         vtctld_web_port = self.vtctld.ports['web_port']
         keyspace = KEYSPACE
         vt_mysql_root = VT_MYSQL_ROOT
         dbname = self.dbconfig.get_dbname()
+        mysql_auth_param = MYSQL_AUTH_PARAM
         all_vars = locals()
         all_vars.update(tablet)
         if all_vars['ttype'] == 'master':
@@ -1028,6 +1059,8 @@ export VTROOT=%(vtroot)s
 export VTTOP=%(vttop)s
 export VT_MYSQL_ROOT=%(vt_mysql_root)s
 export MYSQL_FLAVOR=%(mysql_flavor)s
+
+MYSQL_AUTH_PARAM="%(mysql_auth_param)s"
 
 DBNAME=%(dbname)s
 KEYSPACE=%(keyspace)s
@@ -1047,7 +1080,8 @@ GRPC_PORT=%(grpc_port)s
 ALIAS=%(alias)s
 SHARD=%(shard)s
 TABLET_TYPE=%(ttype)s
-
+EXTRA_PARAMS="%(extra_params)s"
+RDS=%(rds)s
 """ % all_vars
 
     def instance_header_up(self, tablet):
@@ -1177,6 +1211,7 @@ class DbConnectionTypes(ConfigType):
         self.vars = {}
         self.db_types = DB_USERS.keys()
         self.init_file = 'init_db.sql'
+        self.cred_file_path = None
         self.read_config()
 
     def read_config_interactive(self):
@@ -1191,20 +1226,33 @@ class DbConnectionTypes(ConfigType):
         print 'You can grant each user different privilages.'
         print 'First we will prompt you for usernames, passwords and privilages you want to grant for each of these users.'
         print
+        password_set = False
         for db_type in DB_USERS:
             self.dbconfig[db_type] = {}
             print '[%s]: %s' % (db_type, DB_USERS[db_type]['description'])
             prompt = 'Enter username for "%s":' % db_type
-            default = 'vt_%s' % db_type
+            if args.rds:
+                default = 'vtuser'
+            else:
+                default = 'vt_%s' % db_type
             user = read_value(prompt, default)
             self.dbconfig[db_type]['user'] = user
+            if args.rds:
+                default = 'vtpassword'
+            else:
+                default = ''
             prompt = 'Enter password for %s (press Enter for no password):' % user
-            password = read_value(prompt)
+            password = read_value(prompt, default)
+            #password_set = password_set or bool(password)
             self.dbconfig[db_type]['user'] = user
             self.dbconfig[db_type]['password'] = password
             perms = read_value('Enter privlages to be granted to user "%s":' % user, ', '.join(DB_USERS[db_type]['permissions']))
             self.dbconfig[db_type]['permissions'] = perms
             print
+
+        if password_set:
+            self.write_mysql_creds()
+
         print 'Now we will ask you for parameters used for creating mysql connections that are shared by all connection types'
         self.dbconfig['global'] = {}
         cell = CELL
@@ -1215,6 +1263,23 @@ class DbConnectionTypes(ConfigType):
             if '%' in default:
                 default = default % locals()
             self.dbconfig['global'][param] = read_value('Enter "%s":' % param, default)
+
+    def get_mysql_auth_param(self):
+        if self.cred_file_path:
+            return '-mysql_auth_server_static_file %s' % self.cred_file_path
+        else:
+            return ''
+
+    def write_mysql_creds(self):
+        creds = {}
+        for db_type in DB_USERS:
+            password = self.dbconfig[db_type]['password']
+            user = self.dbconfig[db_type]['user']
+            creds[user] = [{'Password': password, 'UserData': user}]
+
+        self.cred_file_path = os.path.join(DEPLOYMENT_DIR, 'config', 'mysql_creds.json')
+        with open(self.cred_file_path, 'w') as fh:
+            json.dump(creds, fh, indent=4, separators=(',', ': '))
 
     def generate(self):
         out = self.make_init_db_sql()
@@ -1227,30 +1292,39 @@ class DbConnectionTypes(ConfigType):
         charset = self.dbconfig['global']['charset']
         flags = []
         fmt = '-db-config-%(db_type)s-uname %(user)s'
+        passfmt = '-db-config-%(db_type)s-pass %(password)s'
         for db_type in ['dba']:
             user = self.dbconfig[db_type]['user']
             password = self.dbconfig[db_type]['password']
             flags.append(fmt % locals())
+            if password:
+                flags.append(passfmt % locals())
             for param, value in self.dbconfig['global'].iteritems():
                 if param == 'dbname':
                     continue
                 flags.append('-db-config-%(db_type)s-%(param)s %(value)s' % locals())
         return '"%s"' % ' '.join(flags)
 
-    def get_flags(self):
+    def get_flags(self, host=None, port=None):
         keyspace = '%s_keyspace' % CELL
         charset = self.dbconfig['global']['charset']
         flags = []
         fmt = '-db-config-%(db_type)s-uname %(user)s'
+        passfmt = '-db-config-%(db_type)s-pass %(password)s'
         for db_type in DB_USERS:
             user = self.dbconfig[db_type]['user']
             password = self.dbconfig[db_type]['password']
             flags.append(fmt % locals())
+            if password:
+                flags.append(passfmt % locals())
             for param, value in self.dbconfig['global'].iteritems():
                 if param == 'dbname':
                     continue
                 flags.append('-db-config-%(db_type)s-%(param)s %(value)s' % locals())
-
+            if host:
+                flags.append('-db-config-%(db_type)s-host %(host)s' % locals())
+            if port:
+                flags.append('-db-config-%(db_type)s-port %(port)s' % locals())
         return '"%s"' % ' '.join(flags)
 
 
@@ -1316,7 +1390,7 @@ FLUSH PRIVILEGES;
                 hostname = '%'
             line = "GRANT %(perms)s ON *.* TO '%(user)s'@'%(hostname)s'" % locals()
             if password:
-                line += " IDENTIFIED BY '%(password)s;" % locals()
+                line += " IDENTIFIED BY '%(password)s';" % locals()
             else:
                 line += ";"
             out.append(line)
@@ -1324,7 +1398,7 @@ FLUSH PRIVILEGES;
             if db_type == 'dba':
                 line = "GRANT GRANT OPTION ON *.* TO '%(user)s'@'localhost'" % locals()
                 if password:
-                    line += " IDENTIFIED BY '%(password)s;" % locals()
+                    line += " IDENTIFIED BY '%(password)s';" % locals()
                 else:
                     line += ";"
                     out.append(line)
@@ -1360,6 +1434,10 @@ def define_args():
     ap.add_argument('--interactive', type=str2bool, nargs='?',
                     default=True, const=True,
                     help='Turn interactive mode on or off.')
+
+    ap.add_argument('--rds', type=str2bool, nargs='?',
+                    default=False, const=True,
+                    help='Generate scripts that work with a RDS')
 
     ap.add_argument('--use-config-without-prompt', type=str2bool, nargs='?',
                     default=False, const=True,
@@ -1902,6 +1980,8 @@ def main():
         c_instances['vtgate'] = VtGate(public_hostname, c_instances['lockserver'])
     if 'vttablet' in components:
         c_instances['vttablet'] = VtTablet(public_hostname, c_instances['lockserver'], c_instances['vtctld'])
+        global MYSQL_AUTH_PARAM
+        MYSQL_AUTH_PARAM = c_instances['vttablet'].dbconfig.get_mysql_auth_param()
     # TODO: sort actions
     # TODO: sort components
     for action in actions:
