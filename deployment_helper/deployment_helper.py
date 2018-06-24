@@ -121,7 +121,7 @@ def set_cell_and_keyspace(default_cell):
     if '-' in CELL:
         print("Error: CELL must not contain a '-' character")
         sys.exit(1)
-    default_keyspace = '%s_keyspace' % CELL
+    default_keyspace = 'messagedb'
     KEYSPACE = read_value('Enter KEYSPACE name:', default_keyspace)
 
 base_ports = {
@@ -344,16 +344,16 @@ class LockServer(HostClass):
         if args.vtctld_addr is not None:
             self.init_from_vtctld(args.vtctld_addr)
         else:
-            set_cell_and_keyspace('cell1')
+            set_cell_and_keyspace('uswest')
             self.read_config()
 
     def init_from_vtctld(self, vtctld_endpoint):
         print 'Connecting to vtctld to get topological information at "%s".' % vtctld_endpoint
-        cmd = ['vtctlclient', '-server', vtctld_endpoint, 'GetCellInfoNames']
+        cmd = ['$VTROOT/bin/vtctlclient', '-server', vtctld_endpoint, 'GetCellInfoNames']
         cells = [ c for c in subprocess.check_output(cmd).split('\n') if c]
         print 'Found cells: %s' % cells
         set_cell_and_keyspace(cells[0])
-        cmd = ['vtctlclient', '-server', vtctld_endpoint, 'GetCellInfo', CELL]
+        cmd = ['$VTROOT/bin/vtctlclient', '-server', vtctld_endpoint, 'GetCellInfo', CELL]
         cell_info = json.loads(subprocess.check_output(cmd))
         self.set_topology_from_vtctld(cell_info)
 
@@ -1033,7 +1033,8 @@ TOPOLOGY_FLAGS="%(topology_flags)s"
             if args.rds:
                 extra_params = '-enable_replication_reporter'
             else:
-                extra_params = '-enable_semi_sync -enable_replication_reporter'
+                #extra_params = '-enable_semi_sync -enable_replication_reporter'
+                extra_params = '-enable_replication_reporter'                
             mysql_host = ''
             mysql_port = ''
         topology_flags = self.ls.topology_flags
@@ -1287,7 +1288,13 @@ class DbConnectionTypes(ConfigType):
     def generate(self):
         out = self.make_init_db_sql()
         write_dep_file('config', self.init_file, out)
-
+        for fname in ('vschema.json', 'database_schema.sql'):
+            out = read_template(fname)
+            write_dep_file('config', fname, out)
+        for fname in ('client.sh', 'client.py'):
+            out = read_template(fname)
+            write_bin_file(fname, out)            
+            
     def get_dbname(self):
         return self.dbconfig['global']['dbname']
 
@@ -1367,6 +1374,9 @@ CREATE TABLE IF NOT EXISTS %(sidecar_dbname)s.shard_metadata (
   value MEDIUMBLOB NOT NULL,
   PRIMARY KEY (name)
   ) ENGINE=InnoDB;
+
+# User for app traffic, with global read-write access.
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, RELOAD, PROCESS, FILE, REFERENCES, INDEX, ALTER, SHOW DATABASES, CREATE TEMPORARY TABLES, LOCK TABLES, EXECUTE, REPLICATION SLAVE, REPLICATION CLIENT, CREATE VIEW, SHOW VIEW, CREATE ROUTINE, ALTER ROUTINE, CREATE USER, EVENT, TRIGGER ON *.* TO 'mysql_user'@'%%' IDENTIFIED BY 'mysql_password';
 
 """ % locals()
 
@@ -1474,16 +1484,22 @@ def create_start_cluster(vtctld_host, vtgate_host, tablets, dbname):
     template = r"""#!/bin/bash
 # This script starts a local cluster.
 
+${PS_INTERACTIVE=1}
+
 function run_interactive()
 {
     command=$1
     prompt=${2:-"Run this command? (Y/n):"}
     echo $command
-    read -p "$prompt" response
-    if echo "$response" | grep -iq "^n" ; then
-	echo Not running: $command
-    else
+    if [ ${PS_INTERACTIVE} -eq 0 ]; then
 	eval $command
+    else
+	read -p "$prompt" response
+	if echo "$response" | grep -iq "^n" ; then
+	    echo Not running: $command
+	else
+	    eval $command
+	fi
     fi
 }
 
@@ -1531,8 +1547,8 @@ first_orig_shard=$(echo $orig_shards | cut  -d " " -f1)
 num_orig_shards=$(echo $orig_shards | wc -w)
 
 for shard in $orig_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force %(keyspace)s/$shard $tablet"
+    tablet=$($VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
+    run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force %(keyspace)s/$shard $tablet"
 done
 
 echo
@@ -1541,17 +1557,17 @@ echo When you refresh the page, you should see that one vttablet is the master a
 echo
 echo You can also see this on the command line:
 echo
-run_interactive "vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s"
+run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s"
 echo
 echo The vtctlclient tool can be used to apply the database schema across all tablets in a keyspace.
-echo The following command creates the table defined in the create_test_table.sql file
-run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ApplySchema -sql "$(cat $VTTOP/examples/local/create_test_table.sql)" %(keyspace)s'
+echo The following command creates the table defined in the database_schema.sql file
+run_interactive '$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ApplySchema -sql "$(cat $DIR/../config/database_schema.sql)" %(keyspace)s'
 echo
 echo "Now that the initial schema is applied, it's a good time to take the first backup. This backup will be used to automatically restore any additional replicas that you run, before they connect themselves to the master and catch up on replication. If an existing tablet goes down and comes back up without its data, it will also automatically restore from the latest backup and then resume replication."
 
 for shard in $orig_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -3 | tail -1 | awk '{print $1}')
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 Backup $tablet"
+    tablet=$($VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -3 | tail -1 | awk '{print $1}')
+    run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 Backup $tablet"
 done
 
 
@@ -1559,7 +1575,7 @@ echo
 echo After the backup completes, you can list available backups for the shards:
 
 for shard in $orig_shards; do
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 ListBackups %(keyspace)s/$shard"
+    run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ListBackups %(keyspace)s/$shard"
 done
 
 
@@ -1570,13 +1586,13 @@ echo Note: In this example setup, backups are stored at $VTDATAROOT/backups. In 
 echo Initialize Vitess Routing Schema
 if [ $num_orig_shards -eq 1 ]; then
 echo "In the examples, we are just using a single database with no specific configuration. So we just need to make that (empty) configuration visible for serving. This is done by running the following command:"
-run_interactive "vtctlclient -server %(vtctld_host)s:15999 RebuildVSchemaGraph"
+run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 RebuildVSchemaGraph"
 else
 echo
 echo We will apply the following VSchema:
-cat $VTTOP/examples/local/vschema.json
+cat $DIR/../config/vschema.json
 echo
-run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ApplyVSchema -vschema "$(cat $VTTOP/examples/local/vschema.json)" %(keyspace)s'
+run_interactive '$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ApplyVSchema -vschema "$(cat $DIR/../config/vschema.json)" %(keyspace)s'
 fi
 
 echo Start vtgate
@@ -1586,7 +1602,7 @@ echo Vitess uses vtgate to route each client query to the correct vttablet. This
 run_interactive "$DIR/vtgate-up.sh"
 
 echo Run a simple client application that connects to vtgate and inserst some rows:
-for i in `seq 4`; do $VTTOP/examples/local/client.sh; done
+for i in `seq 4`; do $DIR/../bin/client.sh; done
 
 echo
 echo Congratulations, your local cluster is now up and running.
@@ -1596,7 +1612,7 @@ You can now explore the cluster:
 
     Access vtctld web UI at http://%(vtctld_host)s:15000
     Send commands to vtctld with: vtctlclient -server %(vtctld_host)s:15999 ...
-    Try "vtctlclient -server %(vtctld_host)s:15999 help".
+    Try "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 help".
 
 %(tablet_urls)s
 
@@ -1718,7 +1734,7 @@ This says that we want to shard the data by a hash of the page column. In other 
 We can load this VSchema into Vitess like this:
 EOF
 
-run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ApplyVSchema -vschema "$(cat $VTTOP/examples/local/vschema.json)" %(keyspace)s'
+run_interactive '$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ApplyVSchema -vschema "$(cat $DIR/../config/vschema.json)" %(keyspace)s'
 
 cat << EOF
 
@@ -1770,21 +1786,21 @@ Now, if we run the following command, we  should be able to see tablets for all 
 
 EOF
 
-run_interactive "vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s"
+run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s"
 
 cat << EOF
 Once the tablets are ready, initialize replication by electing the first master for each of the new shards:
 EOF
 for shard in $new_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force %(keyspace)s/$shard $tablet"
+    tablet=$($VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
+    run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 InitShardMaster -force %(keyspace)s/$shard $tablet"
 done
 
 cat << EOF
 Now there should be multiple tablets per shard, with one master for each shard:
 EOF
 
-run_interactive "vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s"
+run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ListAllTablets %(cell)s"
 
 cat << EOF
 The new tablets start out empty, so we need to copy everything from the original shard to the two new ones.
@@ -1793,7 +1809,7 @@ We first copy schema:
 EOF
 
 for shard in $new_shards; do
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 CopySchemaShard %(keyspace)s/$first_orig_shard %(keyspace)s/$shard"
+    run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 CopySchemaShard %(keyspace)s/$first_orig_shard %(keyspace)s/$shard"
 done
 
 cat << EOF
@@ -1829,22 +1845,22 @@ Let us add a few rows to shard 0.
 EOF
 
 read -p "Hit Enter to add 6 rows to the database ..."
-for i in `seq 2`; do $VTTOP/examples/local/client.sh; done
+for i in `seq 2`; do $DIR/../bin/client.sh; done
 
 echo See data on original shard set: $orig_shards:
 echo
 
 for shard in $orig_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
-    run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba $tablet "SELECT count(*) FROM messages"'
+    tablet=$($VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
+    run_interactive '$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba $tablet "SELECT count(*) FROM messages"'
 done
 
 echo See data on new shard set: $new_shards:
 echo
 
 for shard in $new_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
-    run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba $tablet "SELECT count(*) FROM messages"'
+    tablet=$($VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
+    run_interactive '$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba $tablet "SELECT count(*) FROM messages"'
 done
 
 cat << EOF
@@ -1869,11 +1885,11 @@ The process can be rolled back at any point until the master is switched over.
 EOF
 
 for shard in $orig_shards; do
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(keyspace)s/$shard rdonly"
+    run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(keyspace)s/$shard rdonly"
 
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(keyspace)s/$shard replica"
+    run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(keyspace)s/$shard replica"
 
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(keyspace)s/$shard master"
+    run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 MigrateServedTypes %(keyspace)s/$shard master"
 done
 
 
@@ -1890,7 +1906,7 @@ See it for yourself: Let us add a few rows and then inspect the database content
 EOF
 
 read -p "Hit Enter to add 6 rows ..."
-for i in `seq 2`; do $VTTOP/examples/local/client.sh; done
+for i in `seq 2`; do $DIR/../bin/client.sh; done
 
 echo See data on original shard set: $orig_shards:
 echo "(no updates visible since we migrated away from it):"
@@ -1898,16 +1914,16 @@ echo
 echo
 
 for shard in $orig_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
-    run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba $tablet "SELECT count(*) FROM messages"'
+    tablet=$($VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
+    run_interactive '$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba $tablet "SELECT count(*) FROM messages"'
 done
 
 echo See data on new shard set: $new_shards:
 echo
 
 for shard in $new_shards; do
-    tablet=$(vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
-    run_interactive 'vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba $tablet "SELECT count(*) FROM messages"'
+    tablet=$($VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ListShardTablets %(keyspace)s/$shard | head -1 | awk '{print $1}')
+    run_interactive '$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 ExecuteFetchAsDba $tablet "SELECT count(*) FROM messages"'
 done
 
 cat << EOF
@@ -1929,7 +1945,7 @@ Then we can delete the now-empty shard-set:
 EOF
 
 for shard in $orig_shards; do
-    run_interactive "vtctlclient -server %(vtctld_host)s:15999 DeleteShard -recursive %(keyspace)s/$shard"
+    run_interactive "$VTROOT/bin/vtctlclient -server %(vtctld_host)s:15999 DeleteShard -recursive %(keyspace)s/$shard"
 done
 
 echo

@@ -13,6 +13,9 @@ $VTROOT/bin/vtgate \
   -cell ${CELL} \
   -cells_to_watch ${CELL} \
   -tablet_types_to_wait MASTER,REPLICA \
+  -enable_buffer \
+  -buffer_min_time_between_failovers=0m20s \
+  -buffer_max_failover_duration=0m10s \
   -gateway_implementation discoverygateway \
   -service_map 'grpc-vtgateservice' \
   -pid_file $VTDATAROOT/tmp/vtgate.pid \

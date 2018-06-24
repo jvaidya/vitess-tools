@@ -6,6 +6,9 @@ BACKUP_PARAMS_FILE="-backup_storage_implementation file -file_backup_storage_roo
 export LD_LIBRARY_PATH=${VTROOT}/dist/grpc/usr/local/lib
 export PATH=${VTROOT}/bin:${VTROOT}/.local/bin:${VTROOT}/dist/chromedriver:${VTROOT}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/usr/local/go/bin:/usr/local/mysql/bin
 
+ORC_HOST=${VTCTLD_HOST}
+ORC_PORT=30000
+
 case "$MYSQL_FLAVOR" in
   "MySQL56")
     export EXTRA_MY_CNF=$VTROOT/config/mycnf/master_mysql56.cnf
@@ -42,6 +45,8 @@ $VTROOT/bin/vttablet \
     -service_map 'grpc-queryservice,grpc-tabletmanager,grpc-updatestream' \
     -pid_file $VTDATAROOT/$TABLET_DIR/vttablet.pid \
     -vtctld_addr http://${VTCTLD_HOST}:${VTCTLD_WEB_PORT}/ \
+    -orc_api_url http://${ORC_HOST}:${ORC_PORT}/api \
+    -orc_discover_interval "2m" \
     $DBCONFIG_FLAGS \
     ${MYSQL_AUTH_PARAM} ${EXTRA_PARAMS}\
     > $VTDATAROOT/$TABLET_DIR/vttablet.out 2>&1 &
