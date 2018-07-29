@@ -868,8 +868,7 @@ class VtTablet(HostClass):
     up_instance_template = 'vttablet-up-instance.sh'
     down_instance_template = 'vttablet-down-instance.sh'
     short_name = 'vttablet'
-    offset_base = os.getenv('OFFSET_BASE', '100')
-    offset_base = int(offset_base)
+    offset_base = int(os.getenv('TABLET_ID_BASE', '100'))
     shard_config = {}
     shards = []
     tablets = []
@@ -942,7 +941,7 @@ class VtTablet(HostClass):
         for shard in new_shards:
             shard_config[shard]['tablets'] = []
             base_offset = self.offset_base * (all_shards.index(shard) + 1)
-            cnt = 0
+            cnt = int(os.getenv('TABLET_ID_OFFSET', '0'))
             for ttype in self.tablet_types:
                 num_instances = int(shard_config[shard]['num_instances'][ttype])
                 for i in xrange(1, num_instances + 1):
