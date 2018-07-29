@@ -22,7 +22,7 @@ mkdir -p ${VTDATAROOT}/backups
 
 echo "Starting MySQL for tablet $ALIAS..."
 
-if [ $RDS -eq 0 ]; then
+if [ $EXTERNAL_MYSQL -eq 0 ]; then
 
     if [ -d $VTDATAROOT/$TABLET_DIR ]; then
 	echo "Resuming from existing vttablet dir:"

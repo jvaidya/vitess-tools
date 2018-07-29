@@ -87,7 +87,7 @@ This means that the mysql executable should be found at $VT_MYSQL_ROOT/bin/mysql
         print 'MYSQL_FLAVOR=%s' % MYSQL_FLAVOR
         print 'VT_MYSQL_ROOT=%s' % VT_MYSQL_ROOT
 
-    DEPLOYMENT_DIR = os.path.join(VTROOT, 'vitess-deployment')
+    DEPLOYMENT_DIR = os.getenv('DEPLOYMENT_DIR') or os.path.join(VTROOT, 'vitess-deployment')
     print 'DEPLOYMENT_DIR=%s' % DEPLOYMENT_DIR
     print
 
@@ -783,8 +783,8 @@ class MySqld(HostClass):
         self.shards = self.vttablet.shards
         self.tablets = self.vttablet.tablets
         self.dbconfig = DbConnectionTypes()
-        if args.rds:
-            self.up_instance_template = 'mysqld-up-instance-rds.sh'
+        if args.external_mysql:
+            self.up_instance_template = 'mysqld-up-instance-external-mysql.sh'
 
     def read_config_interactive(self):
         pass
@@ -868,7 +868,8 @@ class VtTablet(HostClass):
     up_instance_template = 'vttablet-up-instance.sh'
     down_instance_template = 'vttablet-down-instance.sh'
     short_name = 'vttablet'
-    offset_base = 100
+    offset_base = os.getenv('OFFSET_BASE', '100')
+    offset_base = int(offset_base)
     shard_config = {}
     shards = []
     tablets = []
@@ -1022,19 +1023,19 @@ TOPOLOGY_FLAGS="%(topology_flags)s"
     def instance_header(self, tablet):
         # if mysql_host and host are not the same, we need
         # to do things differently.
-        rds = 0
+        external_mysql = 0
         if tablet['host'] != tablet['mysql_host']:
             extra_params = "-mycnf_server_id %s" % tablet['unique_id']
             mysql_host = tablet['mysql_host']
             mysql_port = tablet['mysql_port']
-            if args.rds:
+            if args.external_mysql:
                 rds = 1
         else:
-            if args.rds:
+            if args.external_mysql:
                 extra_params = '-enable_replication_reporter'
             else:
                 #extra_params = '-enable_semi_sync -enable_replication_reporter'
-                extra_params = '-enable_replication_reporter'                
+                extra_params = '-enable_replication_reporter'
             mysql_host = ''
             mysql_port = ''
         topology_flags = self.ls.topology_flags
@@ -1085,7 +1086,7 @@ ALIAS=%(alias)s
 SHARD=%(shard)s
 TABLET_TYPE=%(ttype)s
 EXTRA_PARAMS="%(extra_params)s"
-RDS=%(rds)s
+EXTERNAL_MYSQL=%(external_mysql)s
 """ % all_vars
 
     def instance_header_up(self, tablet):
@@ -1235,14 +1236,14 @@ class DbConnectionTypes(ConfigType):
             self.dbconfig[db_type] = {}
             print '[%s]: %s' % (db_type, DB_USERS[db_type]['description'])
             prompt = 'Enter username for "%s":' % db_type
-            if args.rds:
-                default = 'vtuser'
+            if args.external_mysql:
+                default = 'mysql_user'
             else:
                 default = 'vt_%s' % db_type
             user = read_value(prompt, default)
             self.dbconfig[db_type]['user'] = user
-            if args.rds:
-                default = 'vtpassword'
+            if args.external_mysql:
+                default = 'mysql_password'
             else:
                 default = ''
             prompt = 'Enter password for %s (press Enter for no password):' % user
@@ -1291,10 +1292,10 @@ class DbConnectionTypes(ConfigType):
         for fname in ('vschema.json', 'database_schema.sql'):
             out = read_template(fname)
             write_dep_file('config', fname, out)
-        for fname in ('client.sh', 'client.py'):
+        for fname in ('client.sh', 'client_grpc.py', 'client_mysql.py'):
             out = read_template(fname)
-            write_bin_file(fname, out)            
-            
+            write_bin_file(fname, out)
+
     def get_dbname(self):
         return self.dbconfig['global']['dbname']
 
@@ -1448,7 +1449,7 @@ def define_args():
                     default=True, const=True,
                     help='Turn interactive mode on or off.')
 
-    ap.add_argument('--rds', type=str2bool, nargs='?',
+    ap.add_argument('--external-mysql', type=str2bool, nargs='?',
                     default=False, const=True,
                     help='Generate scripts that work with a RDS')
 
@@ -1601,8 +1602,8 @@ echo Vitess uses vtgate to route each client query to the correct vttablet. This
 
 run_interactive "$DIR/vtgate-up.sh"
 
-echo Run a simple client application that connects to vtgate and inserst some rows:
-for i in `seq 4`; do $DIR/../bin/client.sh; done
+echo You can run a simple client application that connects to vtgate and inserst some rows:
+python $DIR/client_mysql.py
 
 echo
 echo Congratulations, your local cluster is now up and running.
@@ -1776,8 +1777,10 @@ Now, let us start mysqld (if needed) and vttablets for the new shards using the 
 EOF
 
 for shard in $new_shards; do
-    run_interactive "%(deployment_dir)s/bin/mysqld-up-shard-${shard}.sh"
-    run_interactive "%(deployment_dir)s/bin/vttablet-up-shard-${shard}.sh"
+    %(deployment_dir)s/bin/mysqld-up-shard-${shard}.sh
+    sleep 2
+    %(deployment_dir)s/bin/vttablet-up-shard-${shard}.sh
+    sleep 2
 done
 
 cat << EOF
@@ -1844,9 +1847,6 @@ Let us add a few rows to shard 0.
 
 EOF
 
-read -p "Hit Enter to add 6 rows to the database ..."
-for i in `seq 2`; do $DIR/../bin/client.sh; done
-
 echo See data on original shard set: $orig_shards:
 echo
 
@@ -1904,9 +1904,6 @@ Data updates will be visible on the new shards, but not on the original shard.
 See it for yourself: Let us add a few rows and then inspect the database content.
 
 EOF
-
-read -p "Hit Enter to add 6 rows ..."
-for i in `seq 2`; do $DIR/../bin/client.sh; done
 
 echo See data on original shard set: $orig_shards:
 echo "(no updates visible since we migrated away from it):"
