@@ -1028,7 +1028,7 @@ TOPOLOGY_FLAGS="%(topology_flags)s"
             mysql_host = tablet['mysql_host']
             mysql_port = tablet['mysql_port']
             if args.external_mysql:
-                rds = 1
+                external_mysql = 1
         else:
             if args.external_mysql:
                 extra_params = '-enable_replication_reporter'
