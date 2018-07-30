@@ -1,7 +1,13 @@
 
 # Variables used below would be assigned values above this line
 BACKUP_PARAMS_S3="-backup_storage_implementation s3 -s3_backup_aws_region us-west-2 -s3_backup_storage_bucket vtlabs-vtbackup"
-BACKUP_PARAMS_FILE="-backup_storage_implementation file -file_backup_storage_root $VTDATAROOT/backups -restore_from_backup"
+if [ $EXTERNAL_MYSQL -eq 0 ]; then
+    BACKUP_PARAMS_FILE="-backup_storage_implementation file -file_backup_storage_root $VTDATAROOT/backups -restore_from_backup"
+else
+    BACKUP_PARAMS_FILE=""
+fi
+
+BACKUP_PARAMS=${BACKUP_PARAMS_FILE}
 
 export LD_LIBRARY_PATH=${VTROOT}/dist/grpc/usr/local/lib
 export PATH=${VTROOT}/bin:${VTROOT}/.local/bin:${VTROOT}/dist/chromedriver:${VTROOT}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/usr/local/go/bin:/usr/local/mysql/bin
@@ -38,7 +44,7 @@ $VTROOT/bin/vttablet \
     -init_db_name_override $DBNAME \
     -mycnf_mysql_port $MYSQL_PORT \
     -health_check_interval 5s \
-    $BACKUP_PARAMS_FILE \
+    $BACKUP_PARAMS \
     -binlog_use_v3_resharding_mode \
     -port $WEB_PORT \
     -grpc_port $GRPC_PORT \

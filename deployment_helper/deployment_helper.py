@@ -1335,6 +1335,11 @@ class DbConnectionTypes(ConfigType):
                 flags.append('-db-config-%(db_type)s-host %(host)s' % locals())
             if port:
                 flags.append('-db-config-%(db_type)s-port %(port)s' % locals())
+        if host:
+            flags.append('-db_host %(host)s' % locals())
+        if port:
+            flags.append('-db_port %(port)s' % locals())
+
         return '"%s"' % ' '.join(flags)
 
 
