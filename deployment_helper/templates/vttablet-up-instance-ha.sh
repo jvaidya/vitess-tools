@@ -1,7 +1,7 @@
 
 # Variables used below would be assigned values above this line
 BACKUP_PARAMS_S3="-backup_storage_implementation s3 -s3_backup_aws_region us-west-2 -s3_backup_storage_bucket vtlabs-vtbackup"
-BACKUP_PARAMS_FILE="-backup_storage_implementation file -file_backup_storage_root $VTDATAROOT/backups -restore_from_backup"
+BACKUP_PARAMS_FILE="-backup_storage_implementation file -file_backup_storage_root ${BACKUP_DIR} -restore_from_backup"
 
 export LD_LIBRARY_PATH=${VTROOT}/dist/grpc/usr/local/lib
 export PATH=${VTROOT}/bin:${VTROOT}/.local/bin:${VTROOT}/dist/chromedriver:${VTROOT}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/usr/local/go/bin:/usr/local/mysql/bin
@@ -20,7 +20,7 @@ case "$MYSQL_FLAVOR" in
 esac
 
 mkdir -p ${VTDATAROOT}/tmp
-mkdir -p ${VTDATAROOT}/backups
+mkdir -p ${BACKUP_DIR}
 
 echo "Starting vttablet for $ALIAS..."
 

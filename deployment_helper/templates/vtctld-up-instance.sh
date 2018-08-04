@@ -2,7 +2,7 @@
 
 echo "Starting vtctld..."
 
-mkdir -p $VTDATAROOT/backups
+mkdir -p ${BACKUP_DIR}
 mkdir -p $VTDATAROOT/tmp
 
 ${VTROOT}/bin/vtctld \
@@ -14,7 +14,7 @@ ${VTROOT}/bin/vtctld \
   -workflow_manager_use_election \
   -service_map 'grpc-vtctl' \
   -backup_storage_implementation file \
-  -file_backup_storage_root ${VTDATAROOT}/backups \
+  -file_backup_storage_root ${BACKUP_DIR} \
   -log_dir ${VTDATAROOT}/tmp \
   -port ${WEB_PORT} \
   -grpc_port ${GRPC_PORT} \

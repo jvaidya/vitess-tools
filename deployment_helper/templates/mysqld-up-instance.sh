@@ -18,7 +18,7 @@ case "$MYSQL_FLAVOR" in
 esac
 
 mkdir -p ${VTDATAROOT}/tmp
-mkdir -p ${VTDATAROOT}/backups
+mkdir -p ${BACKUP_DIR}
 
 echo "Starting MySQL for tablet $ALIAS..."
 

@@ -2,7 +2,7 @@
 # Variables used below would be assigned values above this line
 BACKUP_PARAMS_S3="-backup_storage_implementation s3 -s3_backup_aws_region us-west-2 -s3_backup_storage_bucket vtlabs-vtbackup"
 if [ $EXTERNAL_MYSQL -eq 0 ]; then
-    BACKUP_PARAMS_FILE="-backup_storage_implementation file -file_backup_storage_root $VTDATAROOT/backups -restore_from_backup"
+    BACKUP_PARAMS_FILE="-backup_storage_implementation file -file_backup_storage_root ${BACKUP_DIR} -restore_from_backup"
 else
     BACKUP_PARAMS_FILE=""
 fi
@@ -29,7 +29,7 @@ case "$MYSQL_FLAVOR" in
 esac
 
 mkdir -p ${VTDATAROOT}/tmp
-mkdir -p ${VTDATAROOT}/backups
+mkdir -p ${BACKUP_DIR}
 
 echo "Starting vttablet for $ALIAS..."
 

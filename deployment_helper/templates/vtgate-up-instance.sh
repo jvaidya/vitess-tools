@@ -1,6 +1,6 @@
 
 mkdir -p $VTDATAROOT/tmp
-mkdir -p $VTDATAROOT/backups
+mkdir -p ${BACKUP_DIR}
 
 # Start vtgate.
 $VTROOT/bin/vtgate \

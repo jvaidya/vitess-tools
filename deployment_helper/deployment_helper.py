@@ -13,6 +13,7 @@ args = None
 
 VTROOT = None
 VTDATAROOT = None
+BACKUP_DIR = None
 VTTOP = None
 MYSQL_FLAVOR = None
 VT_MYSQL_ROOT = None
@@ -45,7 +46,7 @@ def read_template(filename):
         return ''.join(fh.readlines())
 
 def check_host():
-    global VTROOT, VTTOP, VTDATAROOT, MYSQL_FLAVOR, VT_MYSQL_ROOT, DEPLOYMENT_DIR
+    global VTROOT, VTTOP, VTDATAROOT, MYSQL_FLAVOR, VT_MYSQL_ROOT, DEPLOYMENT_DIR, BACKUP_DIR
     VTROOT = os.environ.get('VTROOT')
     VTTOP = os.environ.get('VTTOP')
     VTDATAROOT = os.environ.get('VTDATAROOT')
@@ -89,6 +90,7 @@ This means that the mysql executable should be found at $VT_MYSQL_ROOT/bin/mysql
 
     DEPLOYMENT_DIR = os.getenv('DEPLOYMENT_DIR') or os.path.join(VTROOT, 'vitess-deployment')
     print 'DEPLOYMENT_DIR=%s' % DEPLOYMENT_DIR
+    BACKUP_DIR = os.getenv('VT_BACKUP_DIR', os.path.join(VTDATAROOT, 'backups'))
     print
 
 g_local_hostname = socket.getfqdn()
@@ -614,6 +616,7 @@ The vtctld server also accepts commands from the vtctlclient tool, which is used
         vtdataroot = VTDATAROOT
         vtroot = VTROOT
         mysql_auth_param = MYSQL_AUTH_PARAM
+        backup_dir = BACKUP_DIR
         return r"""
 #!/bin/bash
 set -e
@@ -627,6 +630,7 @@ CELL="%(cell)s"
 GRPC_PORT=%(grpc_port)s
 WEB_PORT=%(web_port)s
 MYSQL_AUTH_PARAM="%(mysql_auth_param)s"
+BACKUP_DIR="%(backup_dir)s"
 """ % locals()
 
 class VtGate(HostClass):
@@ -688,7 +692,7 @@ class VtGate(HostClass):
         vtroot = VTROOT
         vtdataroot = VTDATAROOT
         mysql_auth_param = MYSQL_AUTH_PARAM
-
+        backup_dir = BACKUP_DIR
         return """
 #!/bin/bash
 set -e
@@ -705,6 +709,7 @@ GRPC_PORT=%(grpc_port)s
 WEB_PORT=%(web_port)s
 MYSQL_SERVER_PORT=%(mysql_server_port)s
 MYSQL_AUTH_PARAM="%(mysql_auth_param)s"
+BACKUP_DIR="%(backup_dir)s"
 """ % locals()
 
 
@@ -1003,6 +1008,7 @@ class VtTablet(HostClass):
         vttop = VTTOP
         cell = CELL
         mysql_flavor = MYSQL_FLAVOR
+        backup_dir = BACKUP_DIR
         return """#!/bin/bash
 # This script creates a single shard vttablet deployment.
 VTDATAROOT=%(vtdataroot)s
@@ -1013,7 +1019,8 @@ MYSQL_FLAVOR=%(mysql_flavor)s
 set -e
 
 mkdir -p ${VTDATAROOT}/tmp
-mkdir -p ${VTDATAROOT}/backups
+BACKUP_DIR="%(backup_dir)s"
+mkdir -p ${BACKUP_DIR}
 
 CELL=%(cell)s
 TOPOLOGY_FLAGS="%(topology_flags)s"
@@ -1052,6 +1059,7 @@ TOPOLOGY_FLAGS="%(topology_flags)s"
         vt_mysql_root = VT_MYSQL_ROOT
         dbname = self.dbconfig.get_dbname()
         mysql_auth_param = MYSQL_AUTH_PARAM
+        backup_dir = BACKUP_DIR
         all_vars = locals()
         all_vars.update(tablet)
         if all_vars['ttype'] == 'master':
@@ -1086,6 +1094,7 @@ SHARD=%(shard)s
 TABLET_TYPE=%(ttype)s
 EXTRA_PARAMS="%(extra_params)s"
 EXTERNAL_MYSQL=%(external_mysql)s
+BACKUP_DIR="%(backup_dir)s"
 """ % all_vars
 
     def instance_header_up(self, tablet):
@@ -1489,7 +1498,8 @@ def create_start_cluster(vtctld_host, vtgate_host, tablets, dbname):
     template = r"""#!/bin/bash
 # This script starts a local cluster.
 
-${PS_INTERACTIVE=1}
+PS_INTERACTIVE=${PS_INTERACTIVE:-"1"}
+BACKUP_DIR=${VT_BACKUP_DIR:-${VTDATAROOT}/backups}
 
 function run_interactive()
 {
@@ -1586,7 +1596,7 @@ done
 
 echo
 echo
-echo Note: In this example setup, backups are stored at $VTDATAROOT/backups. In a multi-server deployment, you would usually mount an NFS directory there. You can also change the location by setting the -file_backup_storage_root flag on vtctld and vttablet
+echo Note: In this example setup, backups are stored at $BACKUP_DIR. In a multi-server deployment, you would usually mount an NFS directory there. You can also change the location by setting the -file_backup_storage_root flag on vtctld and vttablet
 
 echo Initialize Vitess Routing Schema
 if [ $num_orig_shards -eq 1 ]; then
