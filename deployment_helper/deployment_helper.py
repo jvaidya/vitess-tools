@@ -1030,12 +1030,12 @@ TOPOLOGY_FLAGS="%(topology_flags)s"
         # if mysql_host and host are not the same, we need
         # to do things differently.
         external_mysql = 0
-        if tablet['host'] != tablet['mysql_host']:
+        if args.external_mysql:
+            external_mysql = 1
+        if external_mysql:
             extra_params = "-mycnf_server_id %s" % tablet['unique_id']
             mysql_host = tablet['mysql_host']
             mysql_port = tablet['mysql_port']
-            if args.external_mysql:
-                external_mysql = 1
         else:
             if args.external_mysql:
                 extra_params = '-enable_replication_reporter'
