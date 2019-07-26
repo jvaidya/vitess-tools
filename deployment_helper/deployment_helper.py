@@ -1,6 +1,7 @@
+from __future__ import print_function
+
 import argparse
 import socket
-import urllib2
 import os
 import random
 import sys
@@ -8,6 +9,16 @@ import types
 import readline
 import json
 import subprocess
+
+try:
+    input = raw_input
+except NameError:
+    pass
+
+try:
+    from urllib2 import urlopen
+except ImportError:
+    from urllib.request import urlopen
 
 args = None
 
@@ -53,12 +64,12 @@ def check_host():
     MYSQL_FLAVOR = os.environ.get('MYSQL_FLAVOR')
     VT_MYSQL_ROOT = os.environ.get('VT_MYSQL_ROOT')
     if VTROOT is not None and VTDATAROOT is not None and MYSQL_FLAVOR is not None and VT_MYSQL_ROOT is not None:
-        print 'VTROOT=%s' % VTROOT
-        print 'VTDATAROOT=%s' % VTDATAROOT
-        print 'MYSQL_FLAVOR=%s' % MYSQL_FLAVOR
-        print 'VT_MYSQL_ROOT=%s' % VT_MYSQL_ROOT
+        print('VTROOT=%s' % VTROOT)
+        print('VTDATAROOT=%s' % VTDATAROOT)
+        print('MYSQL_FLAVOR=%s' % MYSQL_FLAVOR)
+        print('VT_MYSQL_ROOT=%s' % VT_MYSQL_ROOT)
     else:
-        print """
+        print("""
 We assume that you are running this on a host on which all the required vitess binaries exist
 and you have set the VTROOT and VTDATAROOT environment variable.
 VTROOT is the root of vitess installation. We expect to find the vitess binaries under VTROOT/bin.
@@ -71,7 +82,7 @@ MYSQL_FLAVOR should be one of MariaDB or MySQL56.
 Set the VT_MYSQL_ROOT variable to the root directory of your mysql flavor installation.
 This means that the mysql executable should be found at $VT_MYSQL_ROOT/bin/mysql.
 
-"""
+""")
         if VTROOT is None:
             VTROOT = os.environ.get('VTROOT') or read_value('Did not find VTROOT in environment. Enter VTROOT:')
 
@@ -83,17 +94,17 @@ This means that the mysql executable should be found at $VT_MYSQL_ROOT/bin/mysql
         if VT_MYSQL_ROOT is None:
             VT_MYSQL_ROOT = os.environ.get('VT_MYSQL_ROOT') or read_value('Did not find VT_MYSQL_ROOT in environment. Enter VT_MYSQL_ROOT:')
 
-        print 'VTROOT=%s' % VTROOT
-        print 'VTDATAROOT=%s' % VTDATAROOT
-        print 'MYSQL_FLAVOR=%s' % MYSQL_FLAVOR
-        print 'VT_MYSQL_ROOT=%s' % VT_MYSQL_ROOT
+        print('VTROOT=%s' % VTROOT)
+        print('VTDATAROOT=%s' % VTDATAROOT)
+        print('MYSQL_FLAVOR=%s' % MYSQL_FLAVOR)
+        print('VT_MYSQL_ROOT=%s' % VT_MYSQL_ROOT)
 
     DEPLOYMENT_DIR = os.getenv('DEPLOYMENT_DIR') or os.path.join(VTROOT, 'vitess-deployment')
-    print 'DEPLOYMENT_DIR=%s' % DEPLOYMENT_DIR
+    print('DEPLOYMENT_DIR=%s' % DEPLOYMENT_DIR)
     BACKUP_DIR = os.getenv('VT_BACKUP_DIR', os.path.join(VTDATAROOT, 'backups'))
-    print
+    print()
 
-g_local_hostname = socket.getfqdn()
+g_local_hostname = str(socket.getfqdn())
 
 def read_value_orig(prompt, default=''):
     if not prompt.endswith(' '):
@@ -102,7 +113,7 @@ def read_value_orig(prompt, default=''):
         default = str(default)
     readline.set_startup_hook(lambda: readline.insert_text(default))
     try:
-        return raw_input(prompt).strip()
+        return input(prompt).strip()
     finally:
         readline.set_startup_hook()
 
@@ -112,7 +123,7 @@ def read_value(prompt, default=''):
     if type(default) is int:
         default = str(default)
     prompt = '%s [%s]:' % (prompt, default)
-    val = raw_input(prompt).strip()
+    val = input(prompt).strip()
     if not val:
         val = default
     return val
@@ -141,7 +152,7 @@ class ConfigType(object):
     Written to a config file.
     Is prompted for and read from user input.
     """
-    ConfigTypes = [types.DictType, types.StringType, types.ListType, types.IntType]
+    ConfigTypes = [dict, bytes, list, int]
 
     def get_config_file(self):
         config_dir = os.path.join(DEPLOYMENT_DIR, 'config')
@@ -156,10 +167,10 @@ class ConfigType(object):
             with open(config_file, 'w') as fh:
                 json.dump(out, fh, indent=4, separators=(',', ': '))
         except Exception as e:
-            print e
-            print self.__dict__
+            print(e)
+            print(self.__dict__)
             for k in self.__dict__:
-                print '%s %s' % (k, type(self.__dict__[k]))
+                print('%s %s' % (k, type(self.__dict__[k])))
 
     def read_config(self):
         config_file = self.get_config_file()
@@ -168,11 +179,11 @@ class ConfigType(object):
             if os.path.exists(config_file):
                 with open(config_file) as fh:
                     self.__dict__.update(json.load(fh))
-                print 'Using: %s' % config_file
+                print('Using: %s' % config_file)
                 return
             else:
-                print >> sys.stderr, 'ERROR: Could not find config file: %s'
-                print >> sys.stderr, 'ERROR: Run with --interactive to generate it.'
+                print('ERROR: Could not find config file: %s', file=sys.stderr)
+                print('ERROR: Run with --interactive to generate it.', file=sys.stderr)
                 sys.exit(1)
 
         if os.path.exists(config_file):
@@ -214,31 +225,31 @@ class HostClass(ConfigType):
     def prologue(self):
         name = self.name or self.short_name
         name = '  %s  ' % name
-        print
-        print name.center(80, '*')
-        print
+        print()
+        print(name.center(80, '*'))
+        print()
         if self.description:
-            print
-            print self.description
-            print
+            print()
+            print(self.description)
+            print()
         if self.hardware_recommendation:
-            print self.hardware_recommendation
-            print
-            print self.host_number_calculation
-            print
+            print(self.hardware_recommendation)
+            print()
+            print(self.host_number_calculation)
+            print()
 
     def get_hosts(self):
-        print 'Configured hosts = %s' % self.configured_hosts
-        print """Please specify additional hosts to use for this component.
+        print('Configured hosts = %s' % self.configured_hosts)
+        print("""Please specify additional hosts to use for this component.
 To specify hosts, you can enter hostnames separated by commas or
-you can specify a file (one host per line) as "file:/path/to/file"."""
+you can specify a file (one host per line) as "file:/path/to/file".""")
         public_hostname = get_public_hostname()
         host_prompt = 'Specify hosts for "%s":' % self.short_name
         host_input = read_value(host_prompt, public_hostname)
         if host_input.lower().startswith('file:'):
             _, path = host_input.split(':')
             while not os.path.isfile(path):
-                print 'Could not find file: "%s"' % path
+                print('Could not find file: "%s"' % path)
                 host_input = read_value(host_prompt, host_input)
                 _, path = host_input.split(':')
             with open(path) as fh:
@@ -273,35 +284,35 @@ you can specify a file (one host per line) as "file:/path/to/file"."""
             os.makedirs(fdir)
         with open(fpath, 'w') as fh:
             fh.write(content)
-        os.chmod(fpath, 0755)
+        os.chmod(fpath, 0o0755)
         return fpath
 
     def generate(self):
         if self.up_filename:
             out = self.up_commands()
-            if type(out) in (str, unicode):
+            if type(out) in (str, str):
                 write_bin_file(self.up_filename, out)
-                print '\t%s' % self.up_filename
+                print('\t%s' % self.up_filename)
             else:
-                for host, out in out.iteritems():
+                for host, out in out.items():
                     fname = os.path.join(host, self.up_filename)
                     write_bin_file(fname, out)
-                    print '\t%s' % fname
+                    print('\t%s' % fname)
 
         if self.down_filename:
             out = self.down_commands()
-            if type(out) in (str, unicode):
+            if type(out) in (str, str):
                 write_bin_file(self.down_filename, out)
-                print '\t%s' % self.down_filename
+                print('\t%s' % self.down_filename)
             else:
-                for host, out in out.iteritems():
+                for host, out in out.items():
                     fname = os.path.join(host, self.up_filename)
                     write_bin_file(fname, out)
-                    print '\t%s' % fname
+                    print('\t%s' % fname)
 
     def start(self):
         if getattr(self, 'up_filename') is None:
-            print 'Could not find attribute "up_filename" for %s' % self
+            print('Could not find attribute "up_filename" for %s' % self)
             return
         start_command = os.path.join(DEPLOYMENT_DIR, 'bin', self.up_filename)
         if args.interactive:
@@ -309,7 +320,7 @@ you can specify a file (one host per line) as "file:/path/to/file"."""
         else:
             response = 'Y'
         if response == 'Y':
-            print 'Running: %s' % start_command
+            print('Running: %s' % start_command)
             subprocess.call(['bash', start_command])
 
     def stop(self):
@@ -319,7 +330,7 @@ you can specify a file (one host per line) as "file:/path/to/file"."""
         else:
             response = 'Y'
         if response == 'Y':
-            print 'Running: %s' % stop_command
+            print('Running: %s' % stop_command)
             subprocess.call(['bash', stop_command])
 
     def run_action(self, action):
@@ -330,7 +341,7 @@ you can specify a file (one host per line) as "file:/path/to/file"."""
         elif action == 'stop':
             self.stop()
         else:
-            print 'ERRROR: action "%s" is not defined in %s' % (action, self)
+            print('ERRROR: action "%s" is not defined in %s' % (action, self))
             sys.exit(1)
 
 class Deployment(object):
@@ -350,26 +361,26 @@ class LockServer(HostClass):
             self.read_config()
 
     def init_from_vtctld(self, vtctld_endpoint):
-        print 'Connecting to vtctld to get topological information at "%s".' % vtctld_endpoint
+        print('Connecting to vtctld to get topological information at "%s".' % vtctld_endpoint)
         cmd = ['$VTROOT/bin/vtctlclient', '-server', vtctld_endpoint, 'GetCellInfoNames']
         cells = [ c for c in subprocess.check_output(cmd).split('\n') if c]
-        print 'Found cells: %s' % cells
+        print('Found cells: %s' % cells)
         set_cell_and_keyspace(cells[0])
         cmd = ['$VTROOT/bin/vtctlclient', '-server', vtctld_endpoint, 'GetCellInfo', CELL]
         cell_info = json.loads(subprocess.check_output(cmd))
         self.set_topology_from_vtctld(cell_info)
 
     def read_config_interactive(self):
-        print 'Vitess supports two types of lockservers, zookeeper (zk2) and etcd (etcd)'
-        print
+        print('Vitess supports two types of lockservers, zookeeper (zk2) and etcd (etcd)')
+        print()
         self.ls_type = read_value('Enter the type of lockserver you want to use {"zk2", "etcd"} :', 'zk2')
-        print
+        print()
 
     def read_config(self):
         super(LockServer, self).read_config()
 
         if self.ls_type != 'zk2':
-            print >> sys.stderr, 'ERROR: Not Implemnted'
+            print('ERROR: Not Implemnted', file=sys.stderr)
             sys.exit(1)
 
         self.ls = Zk2()
@@ -414,10 +425,10 @@ on 3 different hosts. If you are running the local cluster demo, you can run all
         return self.configured_hosts[i % len(self.configured_hosts)]
 
     def read_config_interactive(self):
-        print
+        print()
         self.num_instances = int(read_value('Enter number of instances :', '3'))
 
-        for i in xrange(self.num_instances):
+        for i in range(self.num_instances):
             instance_num = i + 1
             host = read_value('For instance %d, enter hostname: ' % instance_num, self.get_default_host(i))
             self.hosts.append(host)
@@ -426,7 +437,7 @@ on 3 different hosts. If you are running the local cluster demo, you can run all
             client_port = base_ports['zk2']['client_port'] + self.hosts.count(host) - 1
             def_ports = '%(leader_port)s:%(election_port)s:%(client_port)s' % locals()
             zk_ports = read_value('For instance %d, enter leader_port:election_port:client_port: ' % instance_num, def_ports)
-            print
+            print()
             self.zk_config.append((host,zk_ports))
 
     def set_topology(self):
@@ -548,7 +559,7 @@ def write_dep_file(subdir, fname, out):
     with open(fpath, 'w') as fh:
         fh.write(out)
     if subdir == 'bin':
-        os.chmod(os.path.join(fpath), 0755)
+        os.chmod(os.path.join(fpath), 0o0755)
     return fpath
 
 class VtCtld(HostClass):
@@ -725,9 +736,9 @@ def make_shards(num_shards):
 
     start = hex(0)
     end = None
-    size = MAX_SHARDS / num_shards
+    size = int(MAX_SHARDS / num_shards)
     shards = []
-    for i in xrange(1, num_shards + 1):
+    for i in range(1, num_shards + 1):
         end = hex(i * size)
         shard = '%s-%s' % (get_str(start), get_str(end))
         if shard == '-':
@@ -758,7 +769,7 @@ def distribute_tablets(shards, configured_hosts):
         tablets = []
         for shard in shards:
             num_instances = shards[shard]['num_instances']
-            tablets += [(shard, tablet_type, i) for i in xrange(1, int(num_instances[tablet_type]) + 1)]
+            tablets += [(shard, tablet_type, i) for i in range(1, int(num_instances[tablet_type]) + 1)]
         for tablet in tablets:
             shard, tablet_type, _ = tablet
             used_hosts = set(tablets_per_host.keys())
@@ -894,18 +905,18 @@ class VtTablet(HostClass):
         self.dbconfig = self.mysqld.dbconfig
 
     def read_config_interactive(self):
-        print
-        print 'A Vitess Tablet is comprised of a vttablet process and a mysqld process.'
+        print()
+        print('A Vitess Tablet is comprised of a vttablet process and a mysqld process.')
         manage_mysqld = read_value('Do you want mysqld managed with vttablets?', 'Y')
         self.manage_mysqld = manage_mysqld.startswith('Y') or manage_mysqld.startswith('y')
-        print
-        print
-        print 'Now we will gather information about vttablets for shards'
-        print
-        print 'Current shards: %s' % self.shards
-        print
-        print 'We will add new shards'
-        print
+        print()
+        print()
+        print('Now we will gather information about vttablets for shards')
+        print()
+        print('Current shards: %s' % self.shards)
+        print()
+        print('We will add new shards')
+        print()
         num_shards = read_value('Enter number of new shards:','1')
         new_shard_candidates = make_shards(int(num_shards))
         default_shards = ','.join(new_shard_candidates)
@@ -914,34 +925,34 @@ class VtTablet(HostClass):
         self.shard_sets.append(new_shards)
         all_shards = self.shards + new_shards
 
-        print
-        print "Tablets can be of the follwing types: %s" % self.tablet_types
-        print 'Every shard has one "master" tablet. This starts out as a tablet of type "replica" and is then promoted to "master"'
-        print 'We recommend two more tablets of type "replica" to enable semi-sync replication and master fail over'
-        print 'For resharding workflow to work, you need at least 2 tablets of type "rdonly".'
-        print 'Thus we recommend a total of 5 tablets, 1 of type "master", 2 of type "replica" and 2 of type "rdonly".'
-        print
-        print 'Now we will gather information about tablet type numbers for each shard'
-        print
+        print()
+        print("Tablets can be of the follwing types: %s" % self.tablet_types)
+        print('Every shard has one "master" tablet. This starts out as a tablet of type "replica" and is then promoted to "master"')
+        print('We recommend two more tablets of type "replica" to enable semi-sync replication and master fail over')
+        print('For resharding workflow to work, you need at least 2 tablets of type "rdonly".')
+        print('Thus we recommend a total of 5 tablets, 1 of type "master", 2 of type "replica" and 2 of type "rdonly".')
+        print()
+        print('Now we will gather information about tablet type numbers for each shard')
+        print()
 
         shard_config = {}
         hosts = {}
         for shard in new_shards:
             num_instances = {}
-            print 'For shard: "%s":' % shard
-            print 'Number of tablets of type "replica" to be converted to master: 1'
+            print('For shard: "%s":' % shard)
+            print('Number of tablets of type "replica" to be converted to master: 1')
             num_instances['master'] = 1
             num_instances['replica'] = read_value('Number of additional tablets of type "replica":', '2')
             num_instances['rdonly'] = read_value('Number of tablets of type "rdonly":', '2')
             shard_config[shard] = dict(num_instances=num_instances)
 
-        print
-        print 'Now we will gather information about each tablet'
-        print
+        print()
+        print('Now we will gather information about each tablet')
+        print()
         tablets_per_host, host_per_tablet = distribute_tablets(shard_config, self.configured_hosts)
-        print 'Distributed %d tablets across %d hosts.' % (len(host_per_tablet), len(tablets_per_host))
-        print 'The hosts will be presented to you as defaults.'
-        print
+        print('Distributed %d tablets across %d hosts.' % (len(host_per_tablet), len(tablets_per_host)))
+        print('The hosts will be presented to you as defaults.')
+        print()
         tablets = []
         for shard in new_shards:
             shard_config[shard]['tablets'] = []
@@ -949,13 +960,13 @@ class VtTablet(HostClass):
             cnt = int(os.getenv('TABLET_ID_OFFSET', '0'))
             for ttype in self.tablet_types:
                 num_instances = int(shard_config[shard]['num_instances'][ttype])
-                for i in xrange(1, num_instances + 1):
+                for i in range(1, num_instances + 1):
                     cnt += 1
                     default_host = host_per_tablet[(shard, ttype, i)]
                     unique_id = base_offset + cnt - 1
                     alias = '%s-%010d' %(CELL, unique_id)
                     tablet_dir ='vt_%010d' % unique_id
-                    print 'Tablet "%(alias)s" (shard="%(shard)s",type="%(ttype)s",num="%(i)d):' % locals()
+                    print('Tablet "%(alias)s" (shard="%(shard)s",type="%(ttype)s",num="%(i)d):' % locals())
                     prompt = '\tEnter host name:'
                     host = read_value(prompt, default_host)
                     prompt = '\tEnter web port number:'
@@ -973,7 +984,7 @@ class VtTablet(HostClass):
                         default = 3306
                     prompt = '\tEnter mysql port number:'
                     mysql_port = read_value(prompt, default)
-                    print
+                    print()
                     tablet = dict(host=host,
                                   grpc_port=grpc_port,
                                   web_port=web_port,
@@ -1179,10 +1190,10 @@ def get_public_hostname():
     fqdn = socket.getfqdn()
     # If we are on aws, use the public address.
     if fqdn.endswith('compute.internal'):
-        response = urllib2.urlopen('http://169.254.169.254/latest/meta-data/public-hostname')
-        return response.read()
-    else:
-        return fqdn
+        response = urlopen('http://169.254.169.254/latest/meta-data/public-hostname')
+        fqdn = response.read()
+
+    return str(fqdn.decode())
 
 DEFAULT_PERMISSIONS = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'RELOAD', 'PROCESS', 'FILE',
                        'REFERENCES', 'INDEX', 'ALTER', 'SHOW DATABASES', 'CREATE TEMPORARY TABLES',
@@ -1222,27 +1233,27 @@ class DbConnectionTypes(ConfigType):
     def __init__(self):
         self.dbconfig = {}
         self.vars = {}
-        self.db_types = DB_USERS.keys()
+        self.db_types = list(DB_USERS.keys())
         self.init_file = 'init_db.sql'
         self.cred_file_path = None
         self.read_config()
 
     def read_config_interactive(self):
-        print
-        print 'Vitess uses a "Sidecar Database" to store metadata.'
-        print 'At the moment, the default name, "_vt" may be hardcoded in vitess at a few places.'
-        print 'If you have changed this, enter the new name, otherwise, accept the default.'
+        print()
+        print('Vitess uses a "Sidecar Database" to store metadata.')
+        print('At the moment, the default name, "_vt" may be hardcoded in vitess at a few places.')
+        print('If you have changed this, enter the new name, otherwise, accept the default.')
         self.sidecar_dbname = read_value('Enter sidecar db name:', '_vt')
-        print
-        print 'Vitess uses the following connection types to connect to mysql: %s' % DB_USERS.keys()
-        print 'Each connection type uses a different user and is used for a different purpose.'
-        print 'You can grant each user different privileges.'
-        print 'First we will prompt you for usernames, passwords and privileges you want to grant for each of these users.'
-        print
+        print()
+        print('Vitess uses the following connection types to connect to mysql: %s' % list(DB_USERS.keys()))
+        print('Each connection type uses a different user and is used for a different purpose.')
+        print('You can grant each user different privileges.')
+        print('First we will prompt you for usernames, passwords and privileges you want to grant for each of these users.')
+        print()
         password_set = False
         for db_type in DB_USERS:
             self.dbconfig[db_type] = {}
-            print '[%s]: %s' % (db_type, DB_USERS[db_type]['description'])
+            print('[%s]: %s' % (db_type, DB_USERS[db_type]['description']))
             prompt = 'Enter username for "%s":' % db_type
             if args.external_mysql:
                 default = 'mysql_user'
@@ -1261,16 +1272,16 @@ class DbConnectionTypes(ConfigType):
             self.dbconfig[db_type]['password'] = password
             perms = read_value('Enter privileges to be granted to user "%s":' % user, ', '.join(DB_USERS[db_type]['permissions']))
             self.dbconfig[db_type]['permissions'] = perms
-            print
+            print()
 
         if password_set:
             self.write_mysql_creds()
 
-        print 'Now we will ask you for parameters used for creating mysql connections that are shared by all connection types'
+        print('Now we will ask you for parameters used for creating mysql connections that are shared by all connection types')
         self.dbconfig['global'] = {}
         cell = CELL
         keyspace = KEYSPACE
-        for param, default in GLOBAL_PARAMS.iteritems():
+        for param, default in GLOBAL_PARAMS.items():
             if '%' in param:
                 param = param % locals()
             if '%' in default:
@@ -1318,7 +1329,7 @@ class DbConnectionTypes(ConfigType):
             flags.append(fmt % locals())
             if password:
                 flags.append(passfmt % locals())
-            for param, value in self.dbconfig['global'].iteritems():
+            for param, value in self.dbconfig['global'].items():
                 if param == 'dbname':
                     continue
                 flags.append('-db-config-%(db_type)s-%(param)s %(value)s' % locals())
@@ -1336,7 +1347,7 @@ class DbConnectionTypes(ConfigType):
             flags.append(fmt % locals())
             if password:
                 flags.append(passfmt % locals())
-            for param, value in self.dbconfig['global'].iteritems():
+            for param, value in self.dbconfig['global'].items():
                 if param == 'dbname':
                     continue
                 flags.append('-db-config-%(db_type)s-%(param)s %(value)s' % locals())
@@ -1997,9 +2008,9 @@ def main():
         components = COMPONENT_CHOICES
         components.remove('all')
 
-    print 'Will perform the action[s]: %s' % ' '.join(['"%s"' % a for a in actions])
-    print 'On component[s]: %s' % ' '.join(['"%s"' % c for c in components])
-    print
+    print('Will perform the action[s]: %s' % ' '.join(['"%s"' % a for a in actions]))
+    print('On component[s]: %s' % ' '.join(['"%s"' % c for c in components]))
+    print()
     public_hostname = get_public_hostname()
     check_host()
     c_instances = {}
@@ -2018,9 +2029,9 @@ def main():
         if action == 'run_demo':
             continue
         if action == 'generate':
-            print
-            print 'Generating scripts under: %s' % os.path.join(DEPLOYMENT_DIR, 'bin')
-            print
+            print()
+            print('Generating scripts under: %s' % os.path.join(DEPLOYMENT_DIR, 'bin'))
+            print()
         for component in components:
             c_instances[component].run_action(action)
 
@@ -2031,15 +2042,15 @@ def run_demo(ls, vtctld, vtgate, vttablets):
     create_start_cluster(vtctld.hostname, vtgate.hostname, vttablets.tablets, vttablets.dbconfig.get_dbname())
     create_destroy_cluster()
     create_sharding_workflow_script(ls, vtctld)
-    print '\t%s' % 'start_cluster.sh'
-    print '\t%s' % 'destroy_cluster.sh'
-    print '\t%s' % 'run_sharding_workflow.sh'
-    print
+    print('\t%s' % 'start_cluster.sh')
+    print('\t%s' % 'destroy_cluster.sh')
+    print('\t%s' % 'run_sharding_workflow.sh')
+    print()
     start_cluster = os.path.join(DEPLOYMENT_DIR, 'bin', 'start_cluster.sh')
     response = read_value('Run "%s" to start cluster now? :' % start_cluster, 'Y')
     if response == 'Y':
         subprocess.call(['bash', start_cluster])
-    print
+    print()
     run_sharding = os.path.join(DEPLOYMENT_DIR, 'bin', 'run_sharding_workflow.sh')
     response = read_value('Run "%s" to demo sharding workflow now? :' % run_sharding, 'Y')
     if response == 'Y':
