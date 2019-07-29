@@ -1191,9 +1191,9 @@ def get_public_hostname():
     # If we are on aws, use the public address.
     if fqdn.endswith('compute.internal'):
         response = urlopen('http://169.254.169.254/latest/meta-data/public-hostname')
-        fqdn = response.read()
+        fqdn = response.read().decode()
 
-    return str(fqdn.decode())
+    return str(fqdn)
 
 DEFAULT_PERMISSIONS = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'RELOAD', 'PROCESS', 'FILE',
                        'REFERENCES', 'INDEX', 'ALTER', 'SHOW DATABASES', 'CREATE TEMPORARY TABLES',
