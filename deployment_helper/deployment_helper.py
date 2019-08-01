@@ -152,7 +152,7 @@ class ConfigType(object):
     Written to a config file.
     Is prompted for and read from user input.
     """
-    ConfigTypes = [dict, bytes, list, int]
+    ConfigTypes = [dict, bytes, list, int, str]
 
     def get_config_file(self):
         config_dir = os.path.join(DEPLOYMENT_DIR, 'config')
